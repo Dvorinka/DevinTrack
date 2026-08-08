@@ -7,11 +7,13 @@ Only intercepts 'devin acp'; all other subcommands are exec'd to the real binary
 jarvis: ceiling Python prototype; rewrite in Go if upstream wants a single-binary CLI.
 """
 
+import atexit
 import json
 import logging
 import os
 import queue
 import shutil
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -61,23 +63,24 @@ def init_db():
                 input_tokens INTEGER DEFAULT 0,
                 output_tokens INTEGER DEFAULT 0,
                 total_tokens INTEGER DEFAULT 0,
-                duration_ms INTEGER,
-                stop_reason TEXT,
                 cached_read_tokens INTEGER DEFAULT 0,
                 cached_write_tokens INTEGER DEFAULT 0,
+                duration_ms INTEGER,
+                stop_reason TEXT,
+                error_message TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
             """
         )
         # Add columns introduced after the first schema version.
-        try:
-            conn.execute('ALTER TABLE usage ADD COLUMN cached_read_tokens INTEGER DEFAULT 0')
-        except sqlite3.OperationalError:
-            pass
-        try:
-            conn.execute('ALTER TABLE usage ADD COLUMN cached_write_tokens INTEGER DEFAULT 0')
-        except sqlite3.OperationalError:
-            pass
+        for col in ('cached_read_tokens', 'cached_write_tokens', 'error_message'):
+            try:
+                if 'tokens' in col:
+                    conn.execute(f'ALTER TABLE usage ADD COLUMN {col} INTEGER DEFAULT 0')
+                else:
+                    conn.execute(f'ALTER TABLE usage ADD COLUMN {col} TEXT')
+            except sqlite3.OperationalError:
+                pass
 
 
 def find_real_devin() -> str:
@@ -121,11 +124,25 @@ def extract_model(config_options):
     return None
 
 
+def maybe_json(line_bytes: bytes):
+    """Return (parsed_dict, text) for a line, or (None, None) if not valid JSON."""
+    # Strip the line terminator(s) before parsing, but keep the original bytes for forwarding.
+    text = line_bytes.decode('utf-8', errors='replace').rstrip('\r\n')
+    try:
+        obj = json.loads(text)
+    except json.JSONDecodeError:
+        return None, None
+    if not isinstance(obj, dict):
+        return None, None
+    return obj, text
+
+
 class Tracker:
     def __init__(self):
         self._conn = sqlite3.connect(db_path(), check_same_thread=False)
         self._lock = threading.Lock()
-        self._pending = {}  # id -> {session_id, request_id, start}
+        # id -> {session_id, request_id, start}
+        self._pending = {}
 
     def _execute(self, *args, **kwargs):
         with self._lock:
@@ -152,10 +169,14 @@ class Tracker:
                 )
             self._conn.commit()
 
-    def on_request(self, msg: dict, raw: str):
-        method = msg.get('method')
-        params = msg.get('params') or {}
-        msg_id = msg.get('id')
+    def on_request(self, line_bytes: bytes):
+        obj, _ = maybe_json(line_bytes)
+        if obj is None:
+            return
+
+        method = obj.get('method')
+        params = obj.get('params') or {}
+        msg_id = obj.get('id')
 
         if method in ('session/new', 'session/resume', 'session/load'):
             session_id = params.get('sessionId')
@@ -167,113 +188,148 @@ class Tracker:
             session_id = params.get('sessionId')
             if session_id:
                 self.upsert_session(session_id)
-                self._pending[msg_id] = {
-                    'session_id': session_id,
-                    'request_id': str(msg_id),
-                    'start': time.perf_counter(),
-                }
+                with self._lock:
+                    self._pending[msg_id] = {
+                        'session_id': session_id,
+                        'request_id': str(msg_id),
+                        'start': time.perf_counter(),
+                    }
 
-    def on_response(self, msg: dict, raw: str):
-        msg_id = msg.get('id')
-        result = msg.get('result')
-        error = msg.get('error')
+    def on_response(self, line_bytes: bytes):
+        obj, _ = maybe_json(line_bytes)
+        if obj is None:
+            return
 
+        msg_id = obj.get('id')
+        result = obj.get('result')
+        error = obj.get('error')
+
+        # session/new, session/resume, etc. expose the model in their result.
         if isinstance(result, dict) and 'sessionId' in result:
             session_id = result.get('sessionId')
             model = extract_model(result.get('configOptions'))
             self.upsert_session(session_id, model=model)
 
-        if msg_id is not None and msg_id in self._pending:
+        if msg_id is None or msg_id not in self._pending:
+            return
+
+        with self._lock:
             pending = self._pending.pop(msg_id)
-            duration_ms = int((time.perf_counter() - pending['start']) * 1000)
-            session_id = pending['session_id']
 
-            stop_reason = None
-            input_tokens = 0
-            output_tokens = 0
-            total_tokens = 0
-            cached_read_tokens = 0
-            cached_write_tokens = 0
+        duration_ms = int((time.perf_counter() - pending['start']) * 1000)
+        session_id = pending['session_id']
 
-            if isinstance(result, dict):
-                stop_reason = result.get('stopReason')
-                usage = result.get('usage') or {}
-                input_tokens = usage.get('inputTokens', 0) or 0
-                output_tokens = usage.get('outputTokens', 0) or 0
-                total_tokens = usage.get('totalTokens') or (input_tokens + output_tokens)
-                cached_read_tokens = usage.get('cachedReadTokens', 0) or 0
-                cached_write_tokens = usage.get('cachedWriteTokens', 0) or 0
-            elif error:
-                stop_reason = 'error'
+        stop_reason = None
+        error_message = None
+        input_tokens = 0
+        output_tokens = 0
+        total_tokens = 0
+        cached_read_tokens = 0
+        cached_write_tokens = 0
 
-            # Try to get the model from the sessions table.
-            model = None
-            try:
-                cur = self._execute(
-                    'SELECT model FROM sessions WHERE session_id = ?', (session_id,)
-                )
-                row = cur.fetchone()
-                if row:
-                    model = row[0]
-            except Exception:
-                pass
+        if isinstance(result, dict):
+            stop_reason = result.get('stopReason')
+            usage = result.get('usage') or {}
+            input_tokens = usage.get('inputTokens', 0) or 0
+            output_tokens = usage.get('outputTokens', 0) or 0
+            total_tokens = usage.get('totalTokens')
+            if total_tokens is None:
+                total_tokens = input_tokens + output_tokens
+            cached_read_tokens = usage.get('cachedReadTokens', 0) or 0
+            cached_write_tokens = usage.get('cachedWriteTokens', 0) or 0
+        if error:
+            stop_reason = 'error'
+            error_message = (error.get('message') or str(error))[:1000]
 
-            self._execute(
-                """
-                INSERT INTO usage
-                (timestamp, session_id, request_id, model, input_tokens, output_tokens, total_tokens, cached_read_tokens, cached_write_tokens, duration_ms, stop_reason)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (iso_now(), session_id, pending['request_id'], model,
-                 input_tokens, output_tokens, total_tokens, cached_read_tokens, cached_write_tokens, duration_ms, stop_reason),
-            )
-            self._conn.commit()
-            logging.info(
-                'recorded usage: session=%s request=%s in=%d out=%d total=%d cached=%d/%d ms=%d reason=%s',
-                session_id, pending['request_id'], input_tokens, output_tokens,
-                total_tokens, cached_read_tokens, cached_write_tokens,
-                duration_ms, stop_reason,
-            )
-
-    def handle_message(self, raw: str, direction: str):
+        # Get the model from the sessions table, if known.
+        model = None
         try:
-            msg = json.loads(raw)
-        except json.JSONDecodeError:
-            return
-        if not isinstance(msg, dict):
-            return
-        if direction == 'in':
-            self.on_request(msg, raw)
-        else:
-            self.on_response(msg, raw)
+            cur = self._execute(
+                'SELECT model FROM sessions WHERE session_id = ?', (session_id,)
+            )
+            row = cur.fetchone()
+            if row:
+                model = row[0]
+        except Exception:
+            pass
+
+        self._execute(
+            """
+            INSERT INTO usage
+            (timestamp, session_id, request_id, model,
+             input_tokens, output_tokens, total_tokens,
+             cached_read_tokens, cached_write_tokens,
+             duration_ms, stop_reason, error_message)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (iso_now(), session_id, pending['request_id'], model,
+             input_tokens, output_tokens, total_tokens,
+             cached_read_tokens, cached_write_tokens,
+             duration_ms, stop_reason, error_message),
+        )
+        self._conn.commit()
+        logging.info(
+            'recorded usage: session=%s request=%s in=%d out=%d total=%d cached=%d/%d ms=%d reason=%s',
+            session_id, pending['request_id'], input_tokens, output_tokens,
+            total_tokens, cached_read_tokens, cached_write_tokens,
+            duration_ms, stop_reason,
+        )
 
 
-def forward_stdin(child, tracker):
+def forward_stdin(child):
+    """Read our stdin, observe, then forward to the child stdin as bytes."""
+    stdin = sys.stdin.buffer
     try:
-        for line in iter(sys.stdin.readline, ''):
-            tracker.handle_message(line, 'in')
-            child.stdin.write(line)
-            child.stdin.flush()
+        for line in iter(stdin.readline, b''):
+            child.tracker.on_request(line)
+            child.proc.stdin.write(line)
+            child.proc.stdin.flush()
     except BrokenPipeError:
         pass
     finally:
         try:
-            child.stdin.close()
+            child.proc.stdin.close()
         except Exception:
             pass
 
 
-def forward_stdout(child, tracker, queue):
-    for line in iter(child.stdout.readline, ''):
-        tracker.handle_message(line, 'out')
-        queue.put(('out', line))
-    queue.put(None)
+def forward_stdout(child):
+    """Read child stdout, observe, then enqueue for the main thread to forward."""
+    try:
+        for line in iter(child.proc.stdout.readline, b''):
+            child.tracker.on_response(line)
+            child.out_q.put(line)
+    except Exception:
+        logging.exception('stdout reader failed')
+    finally:
+        child.out_q.put(None)
 
 
 def forward_stderr(child):
-    for line in iter(child.stderr.readline, ''):
-        sys.stderr.write(line)
-        sys.stderr.flush()
+    """Forward child stderr to our stderr, byte-for-byte."""
+    try:
+        for line in iter(child.proc.stderr.readline, b''):
+            sys.stderr.buffer.write(line)
+            sys.stderr.buffer.flush()
+    except Exception:
+        logging.exception('stderr reader failed')
+
+
+class Child:
+    def __init__(self, proc, tracker, out_q):
+        self.proc = proc
+        self.tracker = tracker
+        self.out_q = out_q
+
+
+def _terminate_child(proc):
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
 
 
 def run_acp(real_devin: str, argv: list):
@@ -286,28 +342,40 @@ def run_acp(real_devin: str, argv: list):
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
-        bufsize=1,
+        text=False,
+        bufsize=-1,
         env=env,
     )
 
-    q = queue.Queue()
-    t_in = threading.Thread(target=forward_stdin, args=(proc, tracker), daemon=True)
-    t_out = threading.Thread(target=forward_stdout, args=(proc, tracker, q), daemon=True)
-    t_err = threading.Thread(target=forward_stderr, args=(proc,), daemon=True)
+    # Ensure the child is terminated if the wrapper exits or is signalled.
+    atexit.register(lambda p=proc: _terminate_child(p))
+
+    # Signal handlers: forward SIGTERM/SIGHUP/SIGINT to the child, then exit.
+    for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+        signal.signal(sig, lambda _s, _f, p=proc: (_terminate_child(p), sys.exit(1))[1])
+
+    out_q = queue.Queue()
+    child = Child(proc, tracker, out_q)
+
+    t_in = threading.Thread(target=forward_stdin, args=(child,), daemon=True)
+    t_out = threading.Thread(target=forward_stdout, args=(child,), daemon=True)
+    t_err = threading.Thread(target=forward_stderr, args=(child,), daemon=True)
     t_in.start()
     t_out.start()
     t_err.start()
 
-    while True:
-        item = q.get()
-        if item is None:
-            break
-        _, line = item
-        sys.stdout.write(line)
-        sys.stdout.flush()
+    try:
+        while True:
+            line = out_q.get()
+            if line is None:
+                break
+            sys.stdout.buffer.write(line)
+            sys.stdout.buffer.flush()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        _terminate_child(proc)
 
-    proc.wait()
     return proc.returncode
 
 
