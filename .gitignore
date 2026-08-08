@@ -4,3 +4,6 @@ __pycache__/
 *.log
 *.db
 .DS_Store
+node_modules/
+dist/
+tsconfig.tsbuildinfo
