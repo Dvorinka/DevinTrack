@@ -1,0 +1,333 @@
+#!/usr/bin/env python3
+"""
+Devin ACP transparent passthrough + usage logger.
+Installs as 'devin' in front of the real 'devin acp' binary.
+Only intercepts 'devin acp'; all other subcommands are exec'd to the real binary.
+
+jarvis: ceiling Python prototype; rewrite in Go if upstream wants a single-binary CLI.
+"""
+
+import json
+import logging
+import os
+import queue
+import shutil
+import sqlite3
+import subprocess
+import sys
+import threading
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+def data_dir() -> Path:
+    base = os.environ.get('XDG_DATA_HOME', Path.home() / '.local' / 'share')
+    d = Path(base) / 'devin_track'
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def init_logging():
+    log_path = data_dir() / 'wrapper.log'
+    logging.basicConfig(
+        filename=str(log_path),
+        level=logging.INFO,
+        format='%(asctime)s %(levelname)s %(message)s',
+    )
+
+
+def db_path() -> Path:
+    return data_dir() / 'usage.db'
+
+
+def init_db():
+    with sqlite3.connect(db_path()) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS sessions (
+                session_id TEXT PRIMARY KEY,
+                created_at TEXT,
+                updated_at TEXT,
+                model TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS usage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                session_id TEXT,
+                request_id TEXT,
+                model TEXT,
+                input_tokens INTEGER DEFAULT 0,
+                output_tokens INTEGER DEFAULT 0,
+                total_tokens INTEGER DEFAULT 0,
+                duration_ms INTEGER,
+                stop_reason TEXT,
+                cached_read_tokens INTEGER DEFAULT 0,
+                cached_write_tokens INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+            """
+        )
+        # Add columns introduced after the first schema version.
+        try:
+            conn.execute('ALTER TABLE usage ADD COLUMN cached_read_tokens INTEGER DEFAULT 0')
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute('ALTER TABLE usage ADD COLUMN cached_write_tokens INTEGER DEFAULT 0')
+        except sqlite3.OperationalError:
+            pass
+
+
+def find_real_devin() -> str:
+    if os.environ.get('DEVIN_TRACK_REAL'):
+        return os.environ['DEVIN_TRACK_REAL']
+
+    my_path = os.path.abspath(sys.argv[0])
+    my_dir = os.path.dirname(my_path)
+
+    for alt in ('devin.real', 'devin.bin', 'devin.original'):
+        candidate = os.path.join(my_dir, alt)
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+
+    # Avoid resolving to ourself in PATH.
+    found = shutil.which('devin')
+    if found and os.path.abspath(found) != my_path:
+        return found
+
+    for candidate in (
+        os.path.expanduser('~/.local/bin/devin'),
+        '/usr/share/devin-desktop/resources/app/extensions/windsurf/devin/bin/devin',
+        '/usr/share/devin-desktop/resources/app/extensions/windsurf/devin/bin/devin.real',
+    ):
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+
+    raise FileNotFoundError('real devin binary not found')
+
+
+def iso_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def extract_model(config_options):
+    if not isinstance(config_options, list):
+        return None
+    for opt in config_options:
+        if isinstance(opt, dict) and opt.get('id') == 'model':
+            return opt.get('currentValue')
+    return None
+
+
+class Tracker:
+    def __init__(self):
+        self._conn = sqlite3.connect(db_path(), check_same_thread=False)
+        self._lock = threading.Lock()
+        self._pending = {}  # id -> {session_id, request_id, start}
+
+    def _execute(self, *args, **kwargs):
+        with self._lock:
+            return self._conn.execute(*args, **kwargs)
+
+    def upsert_session(self, session_id: str, model=None, created_at=None):
+        if not session_id:
+            return
+        now = iso_now()
+        with self._lock:
+            cur = self._conn.execute(
+                'SELECT 1 FROM sessions WHERE session_id = ?', (session_id,)
+            )
+            exists = cur.fetchone()
+            if exists:
+                self._conn.execute(
+                    'UPDATE sessions SET updated_at = ?, model = COALESCE(?, model) WHERE session_id = ?',
+                    (now, model, session_id),
+                )
+            else:
+                self._conn.execute(
+                    'INSERT INTO sessions (session_id, created_at, updated_at, model) VALUES (?, ?, ?, ?)',
+                    (session_id, created_at or now, now, model),
+                )
+            self._conn.commit()
+
+    def on_request(self, msg: dict, raw: str):
+        method = msg.get('method')
+        params = msg.get('params') or {}
+        msg_id = msg.get('id')
+
+        if method in ('session/new', 'session/resume', 'session/load'):
+            session_id = params.get('sessionId')
+            if session_id:
+                self.upsert_session(session_id)
+            return
+
+        if method == 'session/prompt' and msg_id is not None:
+            session_id = params.get('sessionId')
+            if session_id:
+                self.upsert_session(session_id)
+                self._pending[msg_id] = {
+                    'session_id': session_id,
+                    'request_id': str(msg_id),
+                    'start': time.perf_counter(),
+                }
+
+    def on_response(self, msg: dict, raw: str):
+        msg_id = msg.get('id')
+        result = msg.get('result')
+        error = msg.get('error')
+
+        if isinstance(result, dict) and 'sessionId' in result:
+            session_id = result.get('sessionId')
+            model = extract_model(result.get('configOptions'))
+            self.upsert_session(session_id, model=model)
+
+        if msg_id is not None and msg_id in self._pending:
+            pending = self._pending.pop(msg_id)
+            duration_ms = int((time.perf_counter() - pending['start']) * 1000)
+            session_id = pending['session_id']
+
+            stop_reason = None
+            input_tokens = 0
+            output_tokens = 0
+            total_tokens = 0
+            cached_read_tokens = 0
+            cached_write_tokens = 0
+
+            if isinstance(result, dict):
+                stop_reason = result.get('stopReason')
+                usage = result.get('usage') or {}
+                input_tokens = usage.get('inputTokens', 0) or 0
+                output_tokens = usage.get('outputTokens', 0) or 0
+                total_tokens = usage.get('totalTokens') or (input_tokens + output_tokens)
+                cached_read_tokens = usage.get('cachedReadTokens', 0) or 0
+                cached_write_tokens = usage.get('cachedWriteTokens', 0) or 0
+            elif error:
+                stop_reason = 'error'
+
+            # Try to get the model from the sessions table.
+            model = None
+            try:
+                cur = self._execute(
+                    'SELECT model FROM sessions WHERE session_id = ?', (session_id,)
+                )
+                row = cur.fetchone()
+                if row:
+                    model = row[0]
+            except Exception:
+                pass
+
+            self._execute(
+                """
+                INSERT INTO usage
+                (timestamp, session_id, request_id, model, input_tokens, output_tokens, total_tokens, cached_read_tokens, cached_write_tokens, duration_ms, stop_reason)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (iso_now(), session_id, pending['request_id'], model,
+                 input_tokens, output_tokens, total_tokens, cached_read_tokens, cached_write_tokens, duration_ms, stop_reason),
+            )
+            self._conn.commit()
+            logging.info(
+                'recorded usage: session=%s request=%s in=%d out=%d total=%d cached=%d/%d ms=%d reason=%s',
+                session_id, pending['request_id'], input_tokens, output_tokens,
+                total_tokens, cached_read_tokens, cached_write_tokens,
+                duration_ms, stop_reason,
+            )
+
+    def handle_message(self, raw: str, direction: str):
+        try:
+            msg = json.loads(raw)
+        except json.JSONDecodeError:
+            return
+        if not isinstance(msg, dict):
+            return
+        if direction == 'in':
+            self.on_request(msg, raw)
+        else:
+            self.on_response(msg, raw)
+
+
+def forward_stdin(child, tracker):
+    try:
+        for line in iter(sys.stdin.readline, ''):
+            tracker.handle_message(line, 'in')
+            child.stdin.write(line)
+            child.stdin.flush()
+    except BrokenPipeError:
+        pass
+    finally:
+        try:
+            child.stdin.close()
+        except Exception:
+            pass
+
+
+def forward_stdout(child, tracker, queue):
+    for line in iter(child.stdout.readline, ''):
+        tracker.handle_message(line, 'out')
+        queue.put(('out', line))
+    queue.put(None)
+
+
+def forward_stderr(child):
+    for line in iter(child.stderr.readline, ''):
+        sys.stderr.write(line)
+        sys.stderr.flush()
+
+
+def run_acp(real_devin: str, argv: list):
+    init_db()
+    tracker = Tracker()
+
+    env = os.environ.copy()
+    proc = subprocess.Popen(
+        [real_devin] + argv,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+        env=env,
+    )
+
+    q = queue.Queue()
+    t_in = threading.Thread(target=forward_stdin, args=(proc, tracker), daemon=True)
+    t_out = threading.Thread(target=forward_stdout, args=(proc, tracker, q), daemon=True)
+    t_err = threading.Thread(target=forward_stderr, args=(proc,), daemon=True)
+    t_in.start()
+    t_out.start()
+    t_err.start()
+
+    while True:
+        item = q.get()
+        if item is None:
+            break
+        _, line = item
+        sys.stdout.write(line)
+        sys.stdout.flush()
+
+    proc.wait()
+    return proc.returncode
+
+
+def main():
+    init_logging()
+    argv = sys.argv[1:]
+
+    if not argv or argv[0] != 'acp':
+        # Not the ACP server; exec the real binary to avoid any overhead/interference.
+        real_devin = find_real_devin()
+        os.execvp(real_devin, [real_devin] + argv)
+
+    real_devin = find_real_devin()
+    logging.info('starting ACP wrapper; real devin=%s', real_devin)
+    try:
+        return run_acp(real_devin, argv)
+    except Exception as e:
+        logging.exception('wrapper error')
+        raise
+
+
+if __name__ == '__main__':
+    sys.exit(main())
