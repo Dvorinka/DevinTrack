@@ -305,49 +305,92 @@ def normalize_model_key(model: str) -> str:
     return model.replace('.', '-').lower()
 
 
+def base_model_key(model: str) -> str:
+    """Normalize and strip reasoning effort suffix to get the base model key.
+
+    'swe-1-7-max' -> 'swe-1-7', 'glm-5-2-high' -> 'glm-5-2', 'summarizer' -> 'summarizer'.
+    """
+    key = normalize_model_key(model)
+    for suffix in _EFFORT_SUFFIXES:
+        if key.endswith('-' + suffix):
+            return key[: -(len(suffix) + 1)]
+    return key
+
+
+def base_model_display_name(raw_display, model):
+    """Get the base model display name without reasoning effort suffix.
+
+    'SWE-1.7 Max' -> 'SWE-1.7', 'GLM-5.2 High' -> 'GLM-5.2'.
+    """
+    if raw_display:
+        for suffix in ('XHigh', 'Medium', 'High', 'Low', 'Max', 'None'):
+            if raw_display.endswith(' ' + suffix):
+                return raw_display[: -(len(suffix) + 1)]
+        return raw_display
+    name = fallback_display_name(model)
+    if name:
+        return name
+    base = base_model_key(model)
+    return base.replace('-', '.').upper() if base != 'unknown' else 'unknown'
+
+
 def api_models(period: str):
     where, params = where_clause(period)
     sql = f"""
         SELECT
             COALESCE(model, 'unknown') as model,
             model_display_name,
+            reasoning_effort,
             COALESCE(SUM(input_tokens), 0),
             COALESCE(SUM(output_tokens), 0),
             COALESCE(SUM(total_tokens), 0),
             COALESCE(SUM(cached_read_tokens), 0),
             COUNT(*)
         FROM usage {where}
-        GROUP BY REPLACE(LOWER(COALESCE(model, 'unknown')), '.', '-')
+        GROUP BY REPLACE(LOWER(COALESCE(model, 'unknown')), '.', '-'),
+                 COALESCE(reasoning_effort, '')
         ORDER BY SUM(total_tokens) DESC
     """
     with sqlite3.connect(db_path()) as conn:
         rows = conn.execute(sql, params).fetchall()
-    # Merge rows with the same normalized key (in case SQLite GROUP BY
-    # doesn't fully collapse due to differing display names).
+    # Merge rows by base model key (strip reasoning suffix).
+    # Track reasoning effort counts to pick the most common one.
     merged = {}
     for r in rows:
-        key = normalize_model_key(r[0])
+        model, display, effort = r[0], r[1], r[2]
+        key = base_model_key(model)
+        # Resolve reasoning effort: stored > fallback from model name.
+        resolved_effort = resolve_effort(effort, model)
         if key in merged:
             m = merged[key]
-            m['input_tokens'] += r[2]
-            m['output_tokens'] += r[3]
-            m['total_tokens'] += r[4]
-            m['cached_read_tokens'] += r[5]
-            m['prompt_count'] += r[6]
+            m['input_tokens'] += r[3]
+            m['output_tokens'] += r[4]
+            m['total_tokens'] += r[5]
+            m['cached_read_tokens'] += r[6]
+            m['prompt_count'] += r[7]
+            # Track effort counts to pick the dominant one.
+            ek = resolved_effort or 'none'
+            m['_effort_counts'][ek] = m['_effort_counts'].get(ek, 0) + r[7]
         else:
-            merged[key] = {
+            m = {
                 'model': key,
-                'display_name': resolve_display_name(r[1], r[0]),
-                'input_tokens': r[2],
-                'output_tokens': r[3],
-                'total_tokens': r[4],
-                'cached_read_tokens': r[5],
-                'prompt_count': r[6],
+                'display_name': base_model_display_name(display, model),
+                'input_tokens': r[3],
+                'output_tokens': r[4],
+                'total_tokens': r[5],
+                'cached_read_tokens': r[6],
+                'prompt_count': r[7],
+                '_effort_counts': {resolved_effort or 'none': r[7]},
             }
+            merged[key] = m
     result = []
     for m in merged.values():
         m['new_input_tokens'] = max(m['input_tokens'] - m['cached_read_tokens'], 0) if m['input_tokens'] else 0
         m['estimated_cost'] = estimate_cost(m['model'], m['input_tokens'], m['output_tokens'], m['cached_read_tokens']) or 0
+        # Pick the most common reasoning effort.
+        effort_counts = m.pop('_effort_counts', {})
+        best_effort = max(effort_counts, key=effort_counts.get) if effort_counts else None
+        m['reasoning_effort'] = best_effort if best_effort != 'none' else None
         result.append(m)
     result.sort(key=lambda x: x['total_tokens'], reverse=True)
     return result
@@ -520,6 +563,174 @@ def api_session_detail(session_id: str):
 # Handles mid-session upgrades, missed events, and duplicate numeric rows.
 # ---------------------------------------------------------------------------
 
+def _extract_model_from_config(config_options):
+    """Extract model value from configOptions list (same logic as wrapper)."""
+    if not isinstance(config_options, list):
+        return None
+    for opt in config_options:
+        if isinstance(opt, dict) and opt.get('id') == 'model':
+            return opt.get('currentValue')
+    return None
+
+
+def _parse_session_metadata(log_path):
+    """Parse wrapper.log for session/new, session/load requests and responses.
+
+    Returns {session_id: {cwd, model, model_display_name, reasoning_effort, description, created_at}}.
+    """
+    sessions = {}
+    # Map request id -> cwd for session/new (sessionId not known until response).
+    pending_cwd = {}
+
+    with open(log_path) as f:
+        for line in f:
+            # Parse request lines: "INFO request method=session/new params={...}"
+            if 'INFO request method=session/new' in line or 'INFO request method=session/load' in line:
+                idx = line.find('params=')
+                if idx < 0:
+                    continue
+                try:
+                    params = json.loads(line[idx + 7:])
+                except json.JSONDecodeError:
+                    continue
+                sid = params.get('sessionId')
+                cwd = params.get('cwd')
+                if sid:
+                    if sid not in sessions:
+                        sessions[sid] = {}
+                    if cwd:
+                        sessions[sid]['cwd'] = cwd
+                # session/new may not have sessionId in the request; stash cwd.
+                # The response will have sessionId.
+                # We can't link request to response by id from this log format,
+                # but session/load has sessionId in the request.
+
+            # Parse response lines: "INFO session response: {...}"
+            if 'INFO session response:' in line:
+                idx = line.find('{')
+                if idx < 0:
+                    continue
+                # Response may be truncated at 3000 chars; try parsing what we have.
+                raw = line[idx:]
+                # Find the sessionId field
+                sid = None
+                for key in ('"sessionId"', '"session_id"'):
+                    pos = raw.find(key)
+                    if pos >= 0:
+                        try:
+                            # Extract the value after the key
+                            rest = raw[pos + len(key):]
+                            # Find the colon and the quoted string
+                            colon = rest.find(':')
+                            if colon >= 0:
+                                rest2 = rest[colon + 1:].strip()
+                                if rest2.startswith('"'):
+                                    end = rest2.find('"', 1)
+                                    if end > 0:
+                                        sid = rest2[1:end]
+                                        break
+                        except Exception:
+                            pass
+                if not sid:
+                    continue
+                if sid not in sessions:
+                    sessions[sid] = {}
+
+                # Try to extract model from configOptions (may be truncated).
+                # Look for "currentValue":"glm-5-2" pattern near "id":"model".
+                model = None
+                model_pos = raw.find('"id": "model"')
+                if model_pos < 0:
+                    model_pos = raw.find('"id":"model"')
+                if model_pos >= 0:
+                    cv_pos = raw.find('"currentValue"', model_pos)
+                    if cv_pos >= 0:
+                        rest = raw[cv_pos:]
+                        colon = rest.find(':')
+                        if colon >= 0:
+                            rest2 = rest[colon + 1:].strip()
+                            if rest2.startswith('"'):
+                                end = rest2.find('"', 1)
+                                if end > 0:
+                                    model = rest2[1:end]
+
+                if model:
+                    sessions[sid]['model'] = model
+                    display = extract_model_display_name_from_config(raw, model)
+                    if display:
+                        sessions[sid]['model_display_name'] = display
+                    effort = fallback_reasoning_effort(model)
+                    if effort:
+                        sessions[sid]['reasoning_effort'] = effort
+
+                # Try to extract description/title (top-level, not from configOptions).
+                # The session response JSON starts with {"modes":..., "configOptions":..., "sessionId":...}
+                # The description/title fields are at the top level, after sessionId.
+                for key in ('"description"', '"title"'):
+                    # Search after the sessionId position to avoid configOptions descriptions.
+                    sid_pos = raw.find(f'"sessionId": "{sid}"')
+                    if sid_pos < 0:
+                        sid_pos = raw.find(f'"sessionId":"{sid}"')
+                    search_start = sid_pos if sid_pos >= 0 else 0
+                    pos = raw.find(key, search_start)
+                    if pos >= 0:
+                        rest = raw[pos + len(key):]
+                        colon = rest.find(':')
+                        if colon >= 0:
+                            rest2 = rest[colon + 1:].strip()
+                            if rest2.startswith('"'):
+                                end = rest2.find('"', 1)
+                                if end > 0:
+                                    val = rest2[1:end]
+                                    if val and val != 'Write and edit code':
+                                        if 'description' not in sessions[sid]:
+                                            sessions[sid]['description'] = val
+                                        break
+
+                # Timestamp from log line.
+                try:
+                    raw_ts = line[:23].strip()
+                    dt = datetime.strptime(raw_ts, '%Y-%m-%d %H:%M:%S,%f')
+                    dt_utc = dt.astimezone(timezone.utc)
+                    ts = dt_utc.isoformat()
+                    if 'created_at' not in sessions[sid]:
+                        sessions[sid]['created_at'] = ts
+                    sessions[sid]['updated_at'] = ts
+                except (ValueError, IndexError):
+                    pass
+
+    return sessions
+
+
+def extract_model_display_name_from_config(raw_json, model):
+    """Extract display name from configOptions by matching model value."""
+    if not model:
+        return None
+    # Look for the model value in the options to find its display name.
+    # Pattern: "value":"<model>"..."name":"<display>"
+    val_key = f'"value": "{model}"'
+    pos = raw_json.find(val_key)
+    if pos < 0:
+        val_key = f'"value":"{model}"'
+        pos = raw_json.find(val_key)
+    if pos < 0:
+        return None
+    # Search forward for "name":"..." within 200 chars.
+    rest = raw_json[pos:pos + 300]
+    name_pos = rest.find('"name"')
+    if name_pos < 0:
+        name_pos = rest.find('"name": ')
+    if name_pos >= 0:
+        rest2 = rest[name_pos:]
+        colon = rest2.find(':')
+        if colon >= 0:
+            rest3 = rest2[colon + 1:].strip()
+            if rest3.startswith('"'):
+                end = rest3.find('"', 1)
+                if end > 0:
+                    return rest3[1:end]
+    return None
+
 def _parse_agent_stopped_events(log_path):
     """Parse wrapper.log and return {(session_id, request_id): (params, log_ts)} for agent_stopped.
 
@@ -586,14 +797,80 @@ def reprocess_wrapper_log():
     events = _parse_agent_stopped_events(log_path)
     if not events:
         return {'ok': True, 'processed': 0, 'inserted': 0, 'deleted_duplicates': 0,
-                'sessions_affected': []}
+                'sessions_affected': [], 'sessions_created': 0}
+
+    # Parse session metadata from the log (cwd, model, description, etc.).
+    session_meta = _parse_session_metadata(log_path)
 
     processed = 0
     inserted = 0
     deleted_duplicates = 0
     sessions_affected = set()
+    sessions_created = 0
 
     with sqlite3.connect(db_path()) as conn:
+        # Phase 0: reconstruct sessions table from log metadata + agent_stopped modelLabel.
+        all_session_ids = set(sid for (sid, _) in events)
+        for sid in all_session_ids:
+            meta = session_meta.get(sid, {})
+            # Also extract model info from agent_stopped events for this session.
+            model_label = None
+            for (eid_sid, eid_rid), (params, log_ts) in events.items():
+                if eid_sid == sid:
+                    stats = params.get('stats') or {}
+                    ml = stats.get('modelLabel')
+                    if ml:
+                        model_label = ml
+                        break
+
+            model = meta.get('model')
+            model_display_name = meta.get('model_display_name')
+            reasoning_effort = meta.get('reasoning_effort')
+            cwd = meta.get('cwd')
+            description = meta.get('description')
+            created_at = meta.get('created_at')
+            updated_at = meta.get('updated_at')
+
+            # If we got modelLabel from agent_stopped, it reflects the actual model
+            # used (even if switched mid-session). Use it to derive model + display + effort.
+            if model_label:
+                model_display_name = model_label
+                label_dashed = model_label.lower().replace(' ', '-')
+                for suffix in _EFFORT_SUFFIXES:
+                    if label_dashed.endswith('-' + suffix):
+                        reasoning_effort = suffix
+                        break
+                model = label_dashed
+
+            # Upsert session row.
+            existing = conn.execute(
+                'SELECT 1 FROM sessions WHERE session_id = ?', (sid,)
+            ).fetchone()
+            if existing:
+                conn.execute(
+                    """UPDATE sessions SET
+                       model = COALESCE(model, ?),
+                       model_display_name = COALESCE(model_display_name, ?),
+                       reasoning_effort = COALESCE(reasoning_effort, ?),
+                       cwd = COALESCE(cwd, ?),
+                       description = COALESCE(description, ?),
+                       created_at = COALESCE(created_at, ?),
+                       updated_at = COALESCE(updated_at, ?),
+                       source = 'local'
+                       WHERE session_id = ?""",
+                    (model, model_display_name, reasoning_effort, cwd,
+                     description, created_at, updated_at, sid),
+                )
+            else:
+                conn.execute(
+                    """INSERT INTO sessions
+                       (session_id, created_at, updated_at, model, model_display_name,
+                        reasoning_effort, cwd, description, source)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'local')""",
+                    (sid, created_at, updated_at, model, model_display_name,
+                     reasoning_effort, cwd, description),
+                )
+                sessions_created += 1
         # Phase 1: delete stale numeric rows that are duplicates of agent_stopped
         # events. Uses the LOG timestamp (not DB timestamp) for time proximity,
         # because DB UUID rows may have been overwritten by a previous reprocess
@@ -689,6 +966,7 @@ def reprocess_wrapper_log():
         'processed': processed,
         'inserted': inserted,
         'deleted_duplicates': deleted_duplicates,
+        'sessions_created': sessions_created,
         'sessions_affected': sorted(sessions_affected),
     }
 

@@ -42,6 +42,7 @@ export interface TimeSeriesPoint {
 export interface ModelBreakdown {
   model: string
   display_name: string
+  reasoning_effort: string | null
   input_tokens: number
   new_input_tokens: number
   output_tokens: number

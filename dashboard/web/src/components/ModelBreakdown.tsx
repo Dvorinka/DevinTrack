@@ -1,5 +1,6 @@
 import { Card, CardHeader, CardTitle, CardContent } from '@/ui/card'
 import { formatTokens, formatCost } from '@/lib/utils'
+import { ReasoningBadge } from '@/components/ReasoningBadge'
 import type { ModelBreakdown } from '@/types'
 
 export function ModelBreakdown({ data }: { data: ModelBreakdown[] }) {
@@ -20,7 +21,10 @@ export function ModelBreakdown({ data }: { data: ModelBreakdown[] }) {
             {data.map((m) => (
               <div key={m.model}>
                 <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-sm font-medium">{m.display_name}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium">{m.display_name}</span>
+                    <ReasoningBadge effort={m.reasoning_effort} />
+                  </div>
                   <div className="flex items-center gap-3">
                     {m.estimated_cost > 0 && (
                       <span className="text-sm font-mono tabular-nums text-green-400">

@@ -1,9 +1,14 @@
+import { useState } from 'react'
 import { Card, CardHeader, CardTitle, CardContent } from '@/ui/card'
 import { Table, Th, Td, Tr } from '@/ui/table'
 import { Badge } from '@/ui/badge'
+import { Button } from '@/ui/button'
 import { formatTokens, formatMs, formatTime, formatCost, modelColor } from '@/lib/utils'
 import { SourceBadge } from '@/components/SourceBadge'
 import type { UsageRow } from '@/types'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
+
+const PAGE_SIZE = 5
 
 const stopTone: Record<string, 'success' | 'error' | 'warning' | 'muted'> = {
   end_turn: 'success',
@@ -19,10 +24,38 @@ export function RecentRequests({
   data: UsageRow[]
   onSelectSession: (id: string) => void
 }) {
+  const [page, setPage] = useState(0)
+  const totalPages = Math.ceil(data.length / PAGE_SIZE)
+  const start = page * PAGE_SIZE
+  const pageData = data.slice(start, start + PAGE_SIZE)
+
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Recent requests</CardTitle>
+      <CardHeader className="flex items-center justify-between">
+        <CardTitle>Recent requests ({data.length})</CardTitle>
+        {totalPages > 1 && (
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              disabled={page === 0}
+            >
+              <ChevronLeft size={14} />
+            </Button>
+            <span className="text-xs text-muted-foreground font-mono tabular-nums">
+              {page + 1} / {totalPages}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+              disabled={page >= totalPages - 1}
+            >
+              <ChevronRight size={14} />
+            </Button>
+          </div>
+        )}
       </CardHeader>
       <CardContent>
         <Table>
@@ -41,7 +74,7 @@ export function RecentRequests({
             </tr>
           </thead>
           <tbody>
-            {data.map((r) => {
+            {pageData.map((r) => {
               const mc = modelColor(r.model)
               return (
                 <Tr key={r.id}>
