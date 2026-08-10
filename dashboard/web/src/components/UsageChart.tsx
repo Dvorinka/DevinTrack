@@ -1,6 +1,6 @@
 import { Card, CardHeader, CardTitle, CardContent } from '@/ui/card'
 import { formatTokens } from '@/lib/utils'
-import type { TimeSeriesPoint } from '@/types'
+import type { TimeSeriesPoint, Period } from '@/types'
 import {
   BarChart,
   Bar,
@@ -31,11 +31,29 @@ function CustomTooltip({ active, payload, label }: any) {
   )
 }
 
-export function UsageChart({ data }: { data: TimeSeriesPoint[] }) {
+function formatXAxisTick(value: string, period: Period) {
+  if (period === 'today' || period === 'yesterday') {
+    const parts = value.split(' ')
+    return parts.length > 1 ? parts[1] : value
+  }
+  const parts = value.split('-')
+  return parts.length >= 3 ? `${parts[1]}-${parts[2]}` : value
+}
+
+export function UsageChart({ data, period }: { data: TimeSeriesPoint[]; period: Period }) {
+  const title = period === 'today' || period === 'yesterday'
+    ? 'Token usage by hour'
+    : 'Token usage by day'
+
+  // Check if any remote data exists to show the second stack group.
+  const hasRemote = data.some(
+    (d) => (d.remote_input_tokens ?? 0) > 0 || (d.remote_output_tokens ?? 0) > 0
+  )
+
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Token usage over time</CardTitle>
+        <CardTitle>{title}</CardTitle>
       </CardHeader>
       <CardContent>
         {data.length === 0 ? (
@@ -44,13 +62,14 @@ export function UsageChart({ data }: { data: TimeSeriesPoint[] }) {
           </div>
         ) : (
           <ResponsiveContainer width="100%" height={280}>
-            <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+            <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }} maxBarSize={48}>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
               <XAxis
                 dataKey="date"
                 tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
                 tickLine={false}
                 axisLine={false}
+                tickFormatter={(v) => formatXAxisTick(v, period)}
               />
               <YAxis
                 tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
@@ -64,9 +83,20 @@ export function UsageChart({ data }: { data: TimeSeriesPoint[] }) {
                 iconType="square"
                 iconSize={8}
               />
-              <Bar dataKey="input_tokens" name="Input" fill="#3b82f6" radius={[3, 3, 0, 0]} />
-              <Bar dataKey="cached_read_tokens" name="Cached" fill="#a855f7" radius={[3, 3, 0, 0]} />
-              <Bar dataKey="output_tokens" name="Output" fill="#10b981" radius={[3, 3, 0, 0]} />
+
+              {/* Local stack — blue/purple/green */}
+              <Bar dataKey="local_new_input_tokens" name="Local Input" stackId="local" fill="#3b82f6" radius={[0, 0, 0, 0]} />
+              <Bar dataKey="local_cached_read_tokens" name="Local Cached" stackId="local" fill="#a855f7" radius={[0, 0, 0, 0]} />
+              <Bar dataKey="local_output_tokens" name="Local Output" stackId="local" fill="#10b981" radius={[hasRemote ? 0 : 3, hasRemote ? 0 : 3, 0, 0]} />
+
+              {/* Remote (Proxmox) stack — orange/amber/red, side by side */}
+              {hasRemote && (
+                <>
+                  <Bar dataKey="remote_new_input_tokens" name="Proxmox Input" stackId="remote" fill="#f97316" radius={[0, 0, 0, 0]} />
+                  <Bar dataKey="remote_cached_read_tokens" name="Proxmox Cached" stackId="remote" fill="#fbbf24" radius={[0, 0, 0, 0]} />
+                  <Bar dataKey="remote_output_tokens" name="Proxmox Output" stackId="remote" fill="#ef4444" radius={[3, 3, 0, 0]} />
+                </>
+              )}
             </BarChart>
           </ResponsiveContainer>
         )}

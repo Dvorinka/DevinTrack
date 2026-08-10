@@ -7,6 +7,7 @@ import { RecentRequests } from '@/components/RecentRequests'
 import { PerformanceMetrics } from '@/components/PerformanceMetrics'
 import { SessionList } from '@/components/SessionList'
 import { SessionDetail } from '@/components/SessionDetail'
+import { ModelFilter } from '@/components/ModelFilter'
 import {
   getOverview,
   getTimeseries,
@@ -15,6 +16,7 @@ import {
   getSessions,
   getSessionDetail,
   getPerformance,
+  resetAllData,
 } from '@/api'
 import type {
   Period,
@@ -26,9 +28,11 @@ import type {
   SessionDetail as SessionDetailData,
   Performance,
 } from '@/types'
+import { Trash2 } from 'lucide-react'
 
 export default function App() {
   const [period, setPeriod] = useState<Period>('7d')
+  const [modelFilter, setModelFilter] = useState<string>('all')
   const [overview, setOverview] = useState<Overview | null>(null)
   const [timeseries, setTimeseries] = useState<TimeSeriesPoint[]>([])
   const [models, setModels] = useState<ModelData[]>([])
@@ -43,10 +47,10 @@ export default function App() {
     setLoading(true)
     try {
       const [ov, ts, md, re, se, pf] = await Promise.all([
-        getOverview(period),
-        getTimeseries(period),
+        getOverview(period, modelFilter),
+        getTimeseries(period, modelFilter),
         getModels(period),
-        getRecent(30),
+        getRecent(30, modelFilter),
         getSessions(),
         getPerformance(period),
       ])
@@ -61,7 +65,7 @@ export default function App() {
     } finally {
       setLoading(false)
     }
-  }, [period])
+  }, [period, modelFilter])
 
   useEffect(() => {
     loadDashboard()
@@ -76,6 +80,18 @@ export default function App() {
       console.error('session detail error', e)
     }
   }, [])
+
+  const handleReset = useCallback(async () => {
+    if (!confirm('Delete ALL usage and session data? This cannot be undone.')) return
+    try {
+      await resetAllData()
+      setSelectedSession(null)
+      setSessionDetail(null)
+      await loadDashboard()
+    } catch (e) {
+      console.error('reset error', e)
+    }
+  }, [loadDashboard])
 
   if (selectedSession && sessionDetail) {
     return (
@@ -96,7 +112,20 @@ export default function App() {
               <span className="text-xs text-muted-foreground animate-pulse">loading...</span>
             )}
           </div>
-          <PeriodSelector value={period} onChange={setPeriod} />
+          <div className="flex items-center gap-3">
+            {models.length > 0 && (
+              <ModelFilter models={models} value={modelFilter} onChange={setModelFilter} />
+            )}
+            <PeriodSelector value={period} onChange={setPeriod} />
+            <button
+              onClick={handleReset}
+              className="flex items-center gap-1.5 bg-secondary text-foreground text-xs rounded-md px-3 py-1.5 border border-border hover:bg-red-500/10 hover:border-red-500/50 hover:text-red-400 transition-colors"
+              title="Delete all data"
+            >
+              <Trash2 size={12} />
+              Reset
+            </button>
+          </div>
         </div>
 
         {/* Overview cards */}
@@ -105,7 +134,7 @@ export default function App() {
         {/* Chart + Models */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2">
-            <UsageChart data={timeseries} />
+            <UsageChart data={timeseries} period={period} />
           </div>
           <div>
             <ModelBreakdown data={models} />

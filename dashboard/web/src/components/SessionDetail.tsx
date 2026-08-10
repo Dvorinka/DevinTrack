@@ -2,7 +2,9 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/ui/card'
 import { Button } from '@/ui/button'
 import { Badge } from '@/ui/badge'
 import { Table, Th, Td, Tr } from '@/ui/table'
-import { formatTokens, formatMs, formatTime, formatDate } from '@/lib/utils'
+import { formatTokens, formatMs, formatTime, formatDate, formatCost, modelColor } from '@/lib/utils'
+import { ReasoningBadge } from '@/components/ReasoningBadge'
+import { SourceBadge } from '@/components/SourceBadge'
 import type { SessionDetail } from '@/types'
 import { ArrowLeft } from 'lucide-react'
 
@@ -23,17 +25,50 @@ export function SessionDetail({
   const t = data.totals
   const started = formatDate(data.created_at)
   const updated = formatTime(data.updated_at)
+  const mc = modelColor(data.model)
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <Button variant="ghost" size="sm" onClick={onBack}>
           <ArrowLeft size={14} className="mr-1" />
           Back
         </Button>
-        <h2 className="text-lg font-semibold font-mono">{data.session_id}</h2>
-        {data.model && <Badge>{data.model}</Badge>}
+        <div className="flex items-center gap-2">
+          <span className={`inline-block w-2.5 h-2.5 rounded-full ${mc.dot}`} />
+          <h2 className="text-lg font-semibold font-mono">{data.session_id}</h2>
+        </div>
+        {data.model && (
+          <Badge className={mc.text}>
+            {data.model_display_name ?? data.model}
+          </Badge>
+        )}
+        <ReasoningBadge effort={data.reasoning_effort} />
+        <SourceBadge source={data.source} />
       </div>
+
+      {(data.description || data.first_prompt) && (
+        <Card className="p-4">
+          {data.description && (
+            <div className="mb-2">
+              <div className="text-xs text-muted-foreground mb-1">Description</div>
+              <div className="text-sm font-medium">{data.description}</div>
+            </div>
+          )}
+          {data.first_prompt && (
+            <div className="mb-2">
+              <div className="text-xs text-muted-foreground mb-1">First prompt</div>
+              <div className="text-sm font-mono">{data.first_prompt}</div>
+            </div>
+          )}
+          {data.cwd && (
+            <div>
+              <div className="text-xs text-muted-foreground mb-1">Working directory</div>
+              <div className="text-xs font-mono text-muted-foreground">{data.cwd}</div>
+            </div>
+          )}
+        </Card>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Card className="p-4">
@@ -54,10 +89,14 @@ export function SessionDetail({
         </Card>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <Card className="p-4">
-          <div className="text-xs text-muted-foreground mb-1">Total input</div>
-          <div className="font-mono text-xl font-semibold tabular-nums text-blue-400">{formatTokens(t.input_tokens)}</div>
+          <div className="text-xs text-muted-foreground mb-1">Est. cost</div>
+          <div className="font-mono text-xl font-semibold tabular-nums text-green-400">{formatCost(t.estimated_cost)}</div>
+        </Card>
+        <Card className="p-4">
+          <div className="text-xs text-muted-foreground mb-1">New input</div>
+          <div className="font-mono text-xl font-semibold tabular-nums text-blue-400">{formatTokens(t.new_input_tokens)}</div>
         </Card>
         <Card className="p-4">
           <div className="text-xs text-muted-foreground mb-1">Total output</div>
@@ -83,37 +122,53 @@ export function SessionDetail({
               <tr>
                 <Th>Time</Th>
                 <Th>Req ID</Th>
+                <Th>Model</Th>
                 <Th className="text-right">Input</Th>
                 <Th className="text-right">Output</Th>
                 <Th className="text-right">Total</Th>
                 <Th className="text-right">Cached</Th>
+                <Th className="text-right">Cost</Th>
                 <Th className="text-right">Duration</Th>
                 <Th>Stop</Th>
               </tr>
             </thead>
             <tbody>
-              {data.requests.map((r) => (
-                <Tr key={r.id}>
-                  <Td className="font-mono text-xs text-muted-foreground">{formatTime(r.timestamp)}</Td>
-                  <Td className="font-mono text-xs">{r.request_id}</Td>
-                  <Td className="text-right font-mono tabular-nums text-xs">{formatTokens(r.input_tokens)}</Td>
-                  <Td className="text-right font-mono tabular-nums text-xs">{formatTokens(r.output_tokens)}</Td>
-                  <Td className="text-right font-mono tabular-nums text-xs font-medium">{formatTokens(r.total_tokens)}</Td>
-                  <Td className="text-right font-mono tabular-nums text-xs text-purple-400">
-                    {r.cached_read_tokens > 0 ? formatTokens(r.cached_read_tokens) : '-'}
-                  </Td>
-                  <Td className="text-right font-mono tabular-nums text-xs text-muted-foreground">
-                    {formatMs(r.duration_ms)}
-                  </Td>
-                  <Td>
-                    {r.stop_reason && (
-                      <Badge tone={stopTone[r.stop_reason] ?? 'muted'}>
-                        {r.stop_reason}
-                      </Badge>
-                    )}
-                  </Td>
-                </Tr>
-              ))}
+              {data.requests.map((r) => {
+                const rmc = modelColor(r.model)
+                return (
+                  <Tr key={r.id}>
+                    <Td className="font-mono text-xs text-muted-foreground">{formatTime(r.timestamp)}</Td>
+                    <Td className="font-mono text-xs">{r.request_id}</Td>
+                    <Td>
+                      <div className="flex items-center gap-1.5">
+                        <span className={`inline-block w-1.5 h-1.5 rounded-full ${rmc.dot}`} />
+                        <span className={`text-xs ${rmc.text}`}>
+                          {r.model_display_name ?? r.model ?? '-'}
+                        </span>
+                      </div>
+                    </Td>
+                    <Td className="text-right font-mono tabular-nums text-xs">{formatTokens(r.new_input_tokens)}</Td>
+                    <Td className="text-right font-mono tabular-nums text-xs">{formatTokens(r.output_tokens)}</Td>
+                    <Td className="text-right font-mono tabular-nums text-xs font-medium">{formatTokens(r.total_tokens)}</Td>
+                    <Td className="text-right font-mono tabular-nums text-xs text-purple-400">
+                      {r.cached_read_tokens > 0 ? formatTokens(r.cached_read_tokens) : '-'}
+                    </Td>
+                    <Td className="text-right font-mono tabular-nums text-xs text-green-400">
+                      {r.estimated_cost > 0 ? formatCost(r.estimated_cost) : '-'}
+                    </Td>
+                    <Td className="text-right font-mono tabular-nums text-xs text-muted-foreground">
+                      {formatMs(r.duration_ms)}
+                    </Td>
+                    <Td>
+                      {r.stop_reason && (
+                        <Badge tone={stopTone[r.stop_reason] ?? 'muted'}>
+                          {r.stop_reason}
+                        </Badge>
+                      )}
+                    </Td>
+                  </Tr>
+                )
+              })}
             </tbody>
           </Table>
         </CardContent>

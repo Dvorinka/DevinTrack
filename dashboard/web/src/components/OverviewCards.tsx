@@ -1,17 +1,19 @@
 import { Card } from '@/ui/card'
-import { formatTokens } from '@/lib/utils'
+import { formatTokens, formatCost } from '@/lib/utils'
 import type { Overview } from '@/types'
-import { ArrowDownRight, ArrowUpRight, Database, FileText, Layers, Zap } from 'lucide-react'
+import { ArrowDownRight, ArrowUpRight, Database, Zap, DollarSign } from 'lucide-react'
 import type { ReactNode } from 'react'
 
 function StatCard({
   label,
   value,
+  displayValue,
   icon,
   accent,
 }: {
   label: string
   value: number
+  displayValue?: string
   icon: ReactNode
   accent: string
 }) {
@@ -22,10 +24,10 @@ function StatCard({
         <span className={accent}>{icon}</span>
       </div>
       <div className="font-mono text-2xl font-semibold tabular-nums">
-        {formatTokens(value)}
+        {displayValue ?? formatTokens(value)}
       </div>
       <div className="text-xs text-muted-foreground mt-1 font-mono tabular-nums">
-        {value.toLocaleString()}
+        {displayValue ? formatTokens(value) : value.toLocaleString()}
       </div>
     </Card>
   )
@@ -33,10 +35,17 @@ function StatCard({
 
 export function OverviewCards({ data }: { data: Overview }) {
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
       <StatCard
-        label="Input"
-        value={data.input_tokens}
+        label="Est. Cost"
+        value={data.estimated_cost}
+        displayValue={formatCost(data.estimated_cost)}
+        icon={<DollarSign size={16} />}
+        accent="text-green-400"
+      />
+      <StatCard
+        label="Input (new)"
+        value={data.new_input_tokens}
         icon={<ArrowDownRight size={16} />}
         accent="text-blue-400"
       />
@@ -57,24 +66,6 @@ export function OverviewCards({ data }: { data: Overview }) {
         value={data.cached_read_tokens}
         icon={<Database size={16} />}
         accent="text-purple-400"
-      />
-      <StatCard
-        label="Cached Write"
-        value={data.cached_write_tokens}
-        icon={<Database size={16} />}
-        accent="text-purple-300"
-      />
-      <StatCard
-        label="Prompts"
-        value={data.prompt_count}
-        icon={<FileText size={16} />}
-        accent="text-sky-400"
-      />
-      <StatCard
-        label="Sessions"
-        value={data.session_count}
-        icon={<Layers size={16} />}
-        accent="text-indigo-400"
       />
     </div>
   )

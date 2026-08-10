@@ -1,5 +1,5 @@
 import { Card, CardHeader, CardTitle, CardContent } from '@/ui/card'
-import { formatTokens } from '@/lib/utils'
+import { formatTokens, formatCost } from '@/lib/utils'
 import type { ModelBreakdown } from '@/types'
 
 export function ModelBreakdown({ data }: { data: ModelBreakdown[] }) {
@@ -20,10 +20,17 @@ export function ModelBreakdown({ data }: { data: ModelBreakdown[] }) {
             {data.map((m) => (
               <div key={m.model}>
                 <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-sm font-medium font-mono">{m.model}</span>
-                  <span className="text-sm font-mono tabular-nums text-muted-foreground">
-                    {formatTokens(m.total_tokens)}
-                  </span>
+                  <span className="text-sm font-medium">{m.display_name}</span>
+                  <div className="flex items-center gap-3">
+                    {m.estimated_cost > 0 && (
+                      <span className="text-sm font-mono tabular-nums text-green-400">
+                        {formatCost(m.estimated_cost)}
+                      </span>
+                    )}
+                    <span className="text-sm font-mono tabular-nums text-muted-foreground">
+                      {formatTokens(m.total_tokens)}
+                    </span>
+                  </div>
                 </div>
                 <div className="h-2 rounded-full bg-secondary overflow-hidden">
                   <div
@@ -33,7 +40,7 @@ export function ModelBreakdown({ data }: { data: ModelBreakdown[] }) {
                 </div>
                 <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
                   <span>{m.prompt_count} prompts</span>
-                  <span>in {formatTokens(m.input_tokens)}</span>
+                  <span>in {formatTokens(m.new_input_tokens)}</span>
                   <span>out {formatTokens(m.output_tokens)}</span>
                   {m.cached_read_tokens > 0 && (
                     <span>cached {formatTokens(m.cached_read_tokens)}</span>
