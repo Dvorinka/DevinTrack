@@ -218,6 +218,8 @@ class Tracker:
         self._pending = {}
         # session_id -> {'iso': str, 'perf': float} for the first session/prompt in the current turn.
         self._turn_start = {}
+        # id -> cwd from session/new (sessionId is not known until the response).
+        self._session_cwd = {}
 
     def _execute(self, *args, **kwargs):
         with self._lock:
@@ -277,6 +279,11 @@ class Tracker:
             cwd = params.get('cwd')
             if session_id:
                 self.upsert_session(session_id, cwd=cwd)
+            # session/new does not include sessionId in the request; stash cwd
+            # by msg_id so the response can attach it to the new session.
+            if method == 'session/new' and not session_id and msg_id is not None:
+                with self._lock:
+                    self._session_cwd[msg_id] = cwd
             return
 
         # Catch model/config change methods
@@ -352,7 +359,9 @@ class Tracker:
             description = result.get('description') or result.get('title')
             display_name = extract_model_display_name(config_opts, model) if model else None
             effort = extract_reasoning_effort(model) if model else None
-            self.upsert_session(session_id, model=model, description=description,
+            with self._lock:
+                cwd = self._session_cwd.pop(msg_id, None)
+            self.upsert_session(session_id, cwd=cwd, model=model, description=description,
                                 model_display_name=display_name, reasoning_effort=effort)
 
         # Also handle set_config_option responses (no sessionId but has configOptions).
