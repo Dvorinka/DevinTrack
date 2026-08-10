@@ -2,6 +2,9 @@
 
 Track token usage and costs for [Devin](https://devin.ai) sessions. A transparent wrapper sits in front of the `devin` CLI, logs every request's token counts to a local SQLite database, and serves a web dashboard with per-model breakdowns, session details, and cost estimates.
 
+[![CI](https://github.com/Dvorinka/DevinTrack/actions/workflows/ci.yml/badge.svg)](https://github.com/Dvorinka/DevinTrack/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 ## How it works
 
 ```
@@ -24,7 +27,17 @@ The wrapper intercepts `devin acp` calls, passes them through to the real binary
 - Session prompts and working directory
 - Request duration and stop reason
 
-All data is stored locally in `~/.local/share/devin_track/usage.db`. No data leaves your machine.
+All data is stored locally. No data leaves your machine.
+
+## Platform support
+
+| Platform | Status | Wrapper | Dashboard | Remote sync |
+|---|---|---|---|---|
+| Linux | Full | Yes | Yes | Yes |
+| macOS | Full | Yes | Yes | Yes |
+| Windows | Partial | Experimental | Yes | N/A (no SSH) |
+
+The dashboard server and frontend work on all platforms. The wrapper works on Linux and macOS. Windows support is experimental — see [Windows notes](#windows-notes) below.
 
 ## Quick start
 
@@ -40,6 +53,14 @@ This produces `dashboard/web/dist/` which the Python server serves statically.
 
 ### 2. Install the wrapper
 
+**Linux / macOS:**
+
+```bash
+sudo python3 deploy.py
+```
+
+Or use the bash convenience script:
+
 ```bash
 sudo ./deploy.sh
 ```
@@ -49,8 +70,18 @@ This backs up the original `devin` binary to `devin.real` and installs the wrapp
 To remove the wrapper and restore the original binary:
 
 ```bash
+sudo python3 deploy.py --undeploy
+# or
 sudo ./undeploy.sh
 ```
+
+**Windows:**
+
+```powershell
+python deploy.py
+```
+
+See [Windows notes](#windows-notes) for details.
 
 ### 3. Start the dashboard
 
@@ -71,7 +102,9 @@ All configuration is via environment variables. No config files needed.
 | `DEVIN_TRACK_PORT` | `7841` | Dashboard server port |
 | `DEVIN_TRACK_REAL` | *(auto-detected)* | Path to the real `devin` binary |
 | `DEVIN_TRACK_SOURCE` | `local` | Source tag for locally captured entries |
-| `XDG_DATA_HOME` | `~/.local/share` | Base directory for data storage |
+| `DEVIN_BIN_DIR` | *(auto-detected)* | Directory containing the Devin binary (deploy script) |
+| `XDG_DATA_HOME` | `~/.local/share` | Base directory for data storage (Linux/macOS) |
+| `LOCALAPPDATA` | *(system default)* | Base directory for data storage (Windows) |
 
 ### Remote sync (optional)
 
@@ -85,7 +118,7 @@ python3 dashboard/sync_remote.py
 ```
 
 | Variable | Default | Description |
-|---|---|---| 
+|---|---|---|
 | `REMOTE_HOST` | *(required)* | Remote host to SSH into |
 | `REMOTE_USER` | `root` | SSH user |
 | `REMOTE_KEY` | `~/.ssh/id_rsa` | SSH private key path |
@@ -95,9 +128,11 @@ python3 dashboard/sync_remote.py
 
 Run continuously with `--loop` (60s interval) or once with no flags. Use `--dry` to preview without inserting.
 
+Custom source tags get unique colors in the dashboard automatically — no code changes needed.
+
 ## Data storage
 
-All data is stored in `~/.local/share/devin_track/`:
+All data is stored in `~/.local/share/devin_track/` (or `%LOCALAPPDATA%\devin_track` on Windows):
 
 | File | Purpose |
 |---|---|
@@ -115,6 +150,7 @@ All data is stored in `~/.local/share/devin_track/`:
 - **Recent requests**: Latest individual requests across all sessions
 - **Filters**: By model, working directory, and time period
 - **Cost estimates**: Based on pricing scraped from `docs.devin.ai` (see `pricing.json`)
+- **Dynamic source badges**: Custom source tags automatically get unique colors
 
 ## Pricing
 
@@ -130,14 +166,29 @@ This scrapes current pricing from `docs.devin.ai` and writes updated rates to `p
 
 - Python 3.10+ (stdlib only, no pip packages)
 - Node.js 18+ and npm (for building the frontend)
-- Devin Desktop (Linux)
+- Devin Desktop
+
+## Windows notes
+
+Windows support is experimental. The wrapper is a Python script, and Windows doesn't use shebang lines. The `deploy.py` script handles this by:
+
+1. Backing up `devin.exe` to `devin.exe.bak`
+2. Installing `devin_wrapper.py` alongside the original
+3. Creating a `devin.cmd` shim that calls Python on the wrapper
+
+You may need to set `DEVIN_TRACK_REAL` to point to the backup binary:
+
+```powershell
+$env:DEVIN_TRACK_REAL = "C:\path\to\devin.exe.bak"
+```
 
 ## Project structure
 
 ```
 devin                    # Wrapper script (Python, replaces the real devin binary)
-deploy.sh                # Install wrapper (backs up original binary)
-undeploy.sh              # Remove wrapper (restores original binary)
+deploy.py                # Cross-platform installer (Linux, macOS, Windows)
+deploy.sh                # Unix convenience wrapper for deploy.py
+undeploy.sh              # Unix convenience wrapper for deploy.py --undeploy
 dashboard/
   server.py              # HTTP server + SQLite database + API
   sync_remote.py         # SSH-based remote data sync
@@ -149,6 +200,10 @@ dashboard/
       api.ts             # API client
       components/        # UI components
       ui/                # Reusable UI primitives
+.github/
+  workflows/ci.yml       # CI: typecheck, build, cross-platform compile
+  ISSUE_TEMPLATE/        # Bug report and feature request templates
+  PULL_REQUEST_TEMPLATE.md
 ```
 
 ## API endpoints
@@ -167,6 +222,10 @@ dashboard/
 | POST | `/api/reprocess` | Re-process wrapper.log |
 | DELETE | `/api/reset` | Clear all data |
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
+
 ## License
 
-MIT
+[MIT](LICENSE)

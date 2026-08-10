@@ -101,9 +101,12 @@ def find_real_devin() -> str:
     my_path = os.path.abspath(sys.argv[0])
     my_dir = os.path.dirname(my_path)
 
-    for alt in ('devin.real', 'devin.bin', 'devin.original'):
+    # Check for backup alongside the wrapper.
+    alt_names = ('devin.real', 'devin.bin', 'devin.original',
+                 'devin.exe.real', 'devin.exe.bak')
+    for alt in alt_names:
         candidate = os.path.join(my_dir, alt)
-        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+        if os.path.isfile(candidate):
             return candidate
 
     # Avoid resolving to ourself in PATH.
@@ -111,12 +114,28 @@ def find_real_devin() -> str:
     if found and os.path.abspath(found) != my_path:
         return found
 
-    for candidate in (
-        os.path.expanduser('~/.local/bin/devin'),
-        '/usr/share/devin-desktop/resources/app/extensions/windsurf/devin/bin/devin',
-        '/usr/share/devin-desktop/resources/app/extensions/windsurf/devin/bin/devin.real',
-    ):
-        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+    # Platform-specific fallback paths.
+    candidates = []
+    if sys.platform == 'win32':
+        candidates = [
+            os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Programs', 'Devin Desktop', 'resources', 'app', 'extensions', 'windsurf', 'devin', 'bin', 'devin.exe'),
+            os.path.join(os.environ.get('PROGRAMFILES', r'C:\Program Files'), 'Devin Desktop', 'resources', 'app', 'extensions', 'windsurf', 'devin', 'bin', 'devin.exe'),
+        ]
+    elif sys.platform == 'darwin':
+        candidates = [
+            '/Applications/Devin Desktop.app/Contents/Resources/app/extensions/windsurf/devin/bin/devin',
+            os.path.expanduser('~/.local/bin/devin'),
+        ]
+    else:  # Linux and other Unix
+        candidates = [
+            os.path.expanduser('~/.local/bin/devin'),
+            '/usr/share/devin-desktop/resources/app/extensions/windsurf/devin/bin/devin',
+            '/usr/share/devin-desktop/resources/app/extensions/windsurf/devin/bin/devin.real',
+            '/usr/local/bin/devin',
+        ]
+
+    for candidate in candidates:
+        if os.path.isfile(candidate):
             return candidate
 
     raise FileNotFoundError('real devin binary not found')
