@@ -71,6 +71,7 @@ export interface UsageRow {
   estimated_cost: number
   source: string
   reasoning_effort: string | null
+  prompt_text: string | null
 }
 
 export interface SessionSummary {

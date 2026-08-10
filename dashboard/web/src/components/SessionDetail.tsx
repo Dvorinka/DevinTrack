@@ -123,6 +123,7 @@ export function SessionDetail({
                 <Th>Time</Th>
                 <Th>Req ID</Th>
                 <Th>Model</Th>
+                <Th className="max-w-[200px]">Prompt</Th>
                 <Th className="text-right">New input</Th>
                 <Th className="text-right">Output</Th>
                 <Th className="text-right">Billable</Th>
@@ -143,9 +144,18 @@ export function SessionDetail({
                       <div className="flex items-center gap-1.5">
                         <span className={`inline-block w-1.5 h-1.5 rounded-full ${rmc.dot}`} />
                         <span className={`text-xs ${rmc.text}`}>
-                          {r.model_display_name ?? r.model ?? '-'}
+                          {baseModelName(r.model_display_name ?? r.model)}
                         </span>
                       </div>
+                    </Td>
+                    <Td className="max-w-[200px]">
+                      {r.prompt_text ? (
+                        <span className="text-xs text-muted-foreground line-clamp-2" title={r.prompt_text}>
+                          {r.prompt_text}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground/40 italic">-</span>
+                      )}
                     </Td>
                     <Td className="text-right font-mono tabular-nums text-xs">{formatTokens(r.new_input_tokens)}</Td>
                     <Td className="text-right font-mono tabular-nums text-xs">{formatTokens(r.output_tokens)}</Td>

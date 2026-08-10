@@ -7,7 +7,7 @@ export function ReasoningBadge({ effort }: { effort: string | null | undefined }
     <span
       className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${style.bg} ${style.text}`}
     >
-      <span className={`inline-block w-1.5 h-1.5 rounded-full ${style.text.replace('text-', 'bg-')}`} />
+      <span className={`inline-block w-1.5 h-1.5 rounded-full ${style.dot}`} />
       {style.label}
     </span>
   )

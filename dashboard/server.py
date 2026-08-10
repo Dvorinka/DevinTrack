@@ -88,7 +88,7 @@ def ensure_db_columns():
     with sqlite3.connect(db_path()) as conn:
         # Usage table additions.
         for col in ('cached_read_tokens', 'cached_write_tokens', 'error_message',
-                    'model_display_name', 'reasoning_effort', 'source'):
+                    'model_display_name', 'reasoning_effort', 'source', 'prompt_text'):
             try:
                 if 'tokens' in col:
                     conn.execute(f'ALTER TABLE usage ADD COLUMN {col} INTEGER DEFAULT 0')
@@ -411,7 +411,7 @@ def api_recent(limit: int = 20, model_filter: str = None):
                input_tokens, output_tokens, total_tokens,
                cached_read_tokens, cached_write_tokens,
                duration_ms, stop_reason, error_message, source,
-               reasoning_effort
+               reasoning_effort, prompt_text
         FROM usage {where}
         ORDER BY id DESC
         LIMIT ?
@@ -439,6 +439,7 @@ def api_recent(limit: int = 20, model_filter: str = None):
             'estimated_cost': estimate_cost(r[4], r[6], r[7], r[9], r[10]) or 0,
             'source': r[14] or 'local',
             'reasoning_effort': resolve_effort(r[15], r[4]),
+            'prompt_text': r[16],
         }
         for r in rows
     ]
@@ -532,7 +533,8 @@ def api_session_detail(session_id: str):
             SELECT id, timestamp, request_id, model, model_display_name,
                    input_tokens, output_tokens, total_tokens,
                    cached_read_tokens, cached_write_tokens,
-                   duration_ms, stop_reason, error_message, source
+                   duration_ms, stop_reason, error_message, source,
+                   reasoning_effort, prompt_text
             FROM usage
             WHERE session_id = ?
             ORDER BY id ASC
@@ -557,6 +559,8 @@ def api_session_detail(session_id: str):
             'error_message': r[12],
             'estimated_cost': estimate_cost(r[3], r[5], r[6], r[8], r[9]) or 0,
             'source': r[13] or 'local',
+            'reasoning_effort': resolve_effort(r[14], r[3]),
+            'prompt_text': r[15],
         }
         for r in urows
     ]
@@ -730,6 +734,53 @@ def _parse_session_metadata(log_path):
     return sessions
 
 
+def _parse_prompt_requests(log_path):
+    """Parse wrapper.log for session/prompt requests.
+
+    Returns {session_id: [(log_ts, prompt_text), ...]} ordered by timestamp.
+    The first entry for a session is the first_prompt.
+    """
+    prompts = {}
+    with open(log_path) as f:
+        for line in f:
+            if 'request method=session/prompt' not in line:
+                continue
+            idx = line.find('params=')
+            if idx < 0:
+                continue
+            try:
+                params = json.loads(line[idx + 7:])
+            except json.JSONDecodeError:
+                continue
+            sid = params.get('sessionId')
+            if not sid:
+                continue
+            prompt_blocks = params.get('prompt')
+            if not isinstance(prompt_blocks, list):
+                continue
+            parts = []
+            for block in prompt_blocks:
+                if isinstance(block, dict) and block.get('type') == 'text':
+                    t = block.get('text')
+                    if t:
+                        parts.append(t)
+            if not parts:
+                continue
+            text = ' '.join(parts)[:500]
+            # Parse timestamp.
+            log_ts = None
+            try:
+                raw_ts = line[:23].strip()
+                dt = datetime.strptime(raw_ts, '%Y-%m-%d %H:%M:%S,%f')
+                log_ts = dt.astimezone(timezone.utc).isoformat()
+            except (ValueError, IndexError):
+                pass
+            if sid not in prompts:
+                prompts[sid] = []
+            prompts[sid].append((log_ts, text))
+    return prompts
+
+
 def extract_model_display_name_from_config(raw_json, model):
     """Extract display name from configOptions by matching model value."""
     if not model:
@@ -829,6 +880,8 @@ def reprocess_wrapper_log():
 
     # Parse session metadata from the log (cwd, model, description, etc.).
     session_meta = _parse_session_metadata(log_path)
+    # Parse session/prompt requests for first_prompt and per-request prompt text.
+    prompt_data = _parse_prompt_requests(log_path)
 
     processed = 0
     inserted = 0
@@ -858,6 +911,10 @@ def reprocess_wrapper_log():
             description = meta.get('description')
             created_at = meta.get('created_at')
             updated_at = meta.get('updated_at')
+            # First prompt from session/prompt requests.
+            first_prompt = None
+            if sid in prompt_data and prompt_data[sid]:
+                first_prompt = prompt_data[sid][0][1]
 
             # If we got modelLabel from agent_stopped, it reflects the actual model
             # used (even if switched mid-session). Use it to derive model + display + effort.
@@ -881,22 +938,23 @@ def reprocess_wrapper_log():
                        model_display_name = COALESCE(model_display_name, ?),
                        reasoning_effort = COALESCE(reasoning_effort, ?),
                        cwd = COALESCE(cwd, ?),
+                       first_prompt = COALESCE(first_prompt, ?),
                        description = COALESCE(description, ?),
                        created_at = COALESCE(created_at, ?),
                        updated_at = COALESCE(updated_at, ?),
                        source = 'local'
                        WHERE session_id = ?""",
                     (model, model_display_name, reasoning_effort, cwd,
-                     description, created_at, updated_at, sid),
+                     first_prompt, description, created_at, updated_at, sid),
                 )
             else:
                 conn.execute(
                     """INSERT INTO sessions
                        (session_id, created_at, updated_at, model, model_display_name,
-                        reasoning_effort, cwd, description, source)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'local')""",
+                        reasoning_effort, cwd, first_prompt, description, source)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'local')""",
                     (sid, created_at, updated_at, model, model_display_name,
-                     reasoning_effort, cwd, description),
+                     reasoning_effort, cwd, first_prompt, description),
                 )
                 sessions_created += 1
         # Phase 1: delete stale numeric rows that are duplicates of agent_stopped
@@ -969,19 +1027,37 @@ def reprocess_wrapper_log():
                 'DELETE FROM usage WHERE session_id = ? AND request_id = ?',
                 (session_id, request_id),
             )
+            # Match prompt_text by session_id and time proximity to the agent_stopped event.
+            prompt_text = None
+            if session_id in prompt_data and log_ts:
+                session_prompts = prompt_data[session_id]
+                # Find the prompt closest to but before this agent_stopped event.
+                best_diff = None
+                for p_ts, p_text in session_prompts:
+                    if p_ts is None:
+                        continue
+                    try:
+                        diff = abs((datetime.fromisoformat(log_ts) -
+                                    datetime.fromisoformat(p_ts)).total_seconds())
+                    except (ValueError, TypeError):
+                        continue
+                    # Prompt should be before or near the agent_stopped event.
+                    if best_diff is None or diff < best_diff:
+                        best_diff = diff
+                        prompt_text = p_text
             conn.execute(
                 """INSERT INTO usage
                    (timestamp, session_id, request_id, model,
                     input_tokens, output_tokens, total_tokens,
                     cached_read_tokens, cached_write_tokens,
                     duration_ms, stop_reason, error_message,
-                    model_display_name, reasoning_effort, source)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    model_display_name, reasoning_effort, source, prompt_text)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (datetime.now(timezone.utc).isoformat(), session_id, request_id, model,
                  input_gross, output, total,
                  cached, 0,
                  duration_ms, stop_reason, None,
-                 model_display_name, reasoning_effort, 'local'),
+                 model_display_name, reasoning_effort, 'local', prompt_text),
             )
             inserted += 1
             sessions_affected.add(session_id)
@@ -1231,7 +1307,17 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute('DELETE FROM usage')
                 conn.execute('DELETE FROM sessions')
                 conn.commit()
-            return self._json({'ok': True, 'message': 'all data cleared'})
+            # Auto-reprocess so data comes back from wrapper.log immediately.
+            try:
+                result = reprocess_wrapper_log()
+                return self._json({
+                    'ok': True,
+                    'message': 'all data cleared and reprocessed',
+                    'reprocessed': result.get('processed', 0),
+                    'sessions_created': result.get('sessions_created', 0),
+                })
+            except Exception as e:
+                return self._json({'ok': True, 'message': 'all data cleared (reprocess failed)', 'error': str(e)})
         return self._json({'error': 'not found'}, 404)
 
     def do_POST(self):

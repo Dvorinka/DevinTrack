@@ -36,14 +36,16 @@ export function formatDate(iso: string): string {
 
 // Reasoning effort color mapping.
 // Values: low, medium, high, xhigh, max (case-insensitive).
-type EffortStyle = { bg: string; text: string; label: string }
+// dot is explicit (not derived from text) because Tailwind JIT cannot
+// see dynamically-generated class names like bg-red-400.
+type EffortStyle = { bg: string; text: string; dot: string; label: string }
 
 const effortMap: Record<string, EffortStyle> = {
-  low:    { bg: 'bg-emerald-500/15', text: 'text-emerald-400', label: 'Low' },
-  medium: { bg: 'bg-sky-500/15',     text: 'text-sky-400',     label: 'Medium' },
-  high:   { bg: 'bg-amber-500/15',   text: 'text-amber-400',   label: 'High' },
-  xhigh:  { bg: 'bg-orange-500/15',  text: 'text-orange-400',  label: 'XHigh' },
-  max:    { bg: 'bg-red-500/15',     text: 'text-red-400',     label: 'Max' },
+  low:    { bg: 'bg-emerald-500/15', text: 'text-emerald-400', dot: 'bg-emerald-400', label: 'Low' },
+  medium: { bg: 'bg-sky-500/15',     text: 'text-sky-400',     dot: 'bg-sky-400',     label: 'Medium' },
+  high:   { bg: 'bg-amber-500/15',   text: 'text-amber-400',   dot: 'bg-amber-400',   label: 'High' },
+  xhigh:  { bg: 'bg-orange-500/15',  text: 'text-orange-400',  dot: 'bg-orange-400',  label: 'XHigh' },
+  max:    { bg: 'bg-red-500/15',     text: 'text-red-400',     dot: 'bg-red-400',     label: 'Max' },
 }
 
 export function effortStyle(effort: string | null | undefined): EffortStyle | null {

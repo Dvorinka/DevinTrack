@@ -77,7 +77,7 @@ def init_db():
         )
         # Add columns introduced after the first schema version.
         for col in ('cached_read_tokens', 'cached_write_tokens', 'error_message',
-                    'model_display_name', 'reasoning_effort', 'source'):
+                    'model_display_name', 'reasoning_effort', 'source', 'prompt_text'):
             try:
                 if 'tokens' in col:
                     conn.execute(f'ALTER TABLE usage ADD COLUMN {col} INTEGER DEFAULT 0')
@@ -223,6 +223,8 @@ class Tracker:
         self._turn_done = {}
         # id -> cwd from session/new (sessionId is not known until the response).
         self._session_cwd = {}
+        # session_id -> prompt_text for the current turn (set by session/prompt request).
+        self._session_prompts = {}
 
     def _execute(self, *args, **kwargs):
         with self._lock:
@@ -274,7 +276,8 @@ class Tracker:
         msg_id = obj.get('id')
 
         # DEBUG: log all request methods to discover model-switching methods
-        if method and method not in ('session/prompt',):
+        # session/prompt is logged too so the reprocessor can reconstruct prompts.
+        if method:
             logging.info('request method=%s params=%s', method, json.dumps(params, ensure_ascii=False)[:2000])
 
         if method in ('session/new', 'session/resume', 'session/load'):
@@ -325,6 +328,10 @@ class Tracker:
                         'request_id': str(msg_id),
                         'start': time.perf_counter(),
                     }
+                    # Store prompt text for this session's current turn.
+                    # agent_stopped will pick it up when recording the final usage row.
+                    if prompt_text:
+                        self._session_prompts[session_id] = prompt_text
                     # Mark the start of a new agent turn so agent_stopped can
                     # clean up intermediate session/prompt rows.
                     if session_id not in self._turn_start:
@@ -446,6 +453,11 @@ class Tracker:
         except Exception:
             pass
 
+        # Pick up prompt text for this request.
+        prompt_text = None
+        with self._lock:
+            prompt_text = self._session_prompts.pop(session_id, None)
+
         self._execute(
             """
             INSERT INTO usage
@@ -453,14 +465,14 @@ class Tracker:
              input_tokens, output_tokens, total_tokens,
              cached_read_tokens, cached_write_tokens,
              duration_ms, stop_reason, error_message,
-             model_display_name, reasoning_effort, source)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             model_display_name, reasoning_effort, source, prompt_text)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (iso_now(), session_id, pending['request_id'], model,
              input_tokens, output_tokens, total_tokens,
              cached_read_tokens, cached_write_tokens,
              duration_ms, stop_reason, error_message,
-             model_display_name, reasoning_effort, 'local'),
+             model_display_name, reasoning_effort, 'local', prompt_text),
         )
         self._conn.commit()
         logging.info(
@@ -576,6 +588,11 @@ class Tracker:
             except Exception:
                 pass
 
+        # Pick up the prompt text for this session's current turn.
+        prompt_text = None
+        with self._lock:
+            prompt_text = self._session_prompts.pop(session_id, None)
+
         self._execute(
             """
             INSERT INTO usage
@@ -583,19 +600,21 @@ class Tracker:
              input_tokens, output_tokens, total_tokens,
              cached_read_tokens, cached_write_tokens,
              duration_ms, stop_reason, error_message,
-             model_display_name, reasoning_effort, source)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             model_display_name, reasoning_effort, source, prompt_text)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (iso_now(), session_id, request_id, model,
              input_gross, output, total,
              cached, 0,
              duration_ms, stop_reason, None,
-             model_display_name, reasoning_effort, 'local'),
+             model_display_name, reasoning_effort, 'local', prompt_text),
         )
 
         # Mark turn as done so any late session/prompt response skips its numeric row.
         with self._lock:
             self._turn_done[session_id] = True
+            # Clean up the prompt text for this session.
+            self._session_prompts.pop(session_id, None)
 
         # Update session metadata with final model / display name.
         if model or model_display_name or reasoning_effort:
