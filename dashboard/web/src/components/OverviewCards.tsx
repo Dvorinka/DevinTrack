@@ -56,13 +56,13 @@ export function OverviewCards({ data }: { data: Overview }) {
         accent="text-emerald-400"
       />
       <StatCard
-        label="Total"
+        label="Billable"
         value={data.total_tokens}
         icon={<Zap size={16} />}
         accent="text-amber-400"
       />
       <StatCard
-        label="Cached Read"
+        label="Cache reads"
         value={data.cached_read_tokens}
         icon={<Database size={16} />}
         accent="text-purple-400"

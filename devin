@@ -218,6 +218,9 @@ class Tracker:
         self._pending = {}
         # session_id -> {'iso': str, 'perf': float} for the first session/prompt in the current turn.
         self._turn_start = {}
+        # session_id -> True once agent_stopped has been recorded for the current turn.
+        # Late session/prompt responses check this to avoid inserting a duplicate numeric row.
+        self._turn_done = {}
         # id -> cwd from session/new (sessionId is not known until the response).
         self._session_cwd = {}
 
@@ -329,6 +332,7 @@ class Tracker:
                             'iso': iso_now(),
                             'perf': time.perf_counter(),
                         }
+                        self._turn_done.pop(session_id, None)
 
     def on_response(self, line_bytes: bytes):
         obj, _ = maybe_json(line_bytes)
@@ -392,6 +396,16 @@ class Tracker:
 
         duration_ms = int((time.perf_counter() - pending['start']) * 1000)
         session_id = pending['session_id']
+
+        # If agent_stopped already recorded the final cumulative usage for this
+        # turn, skip the per-call session/prompt row to avoid duplicates.
+        with self._lock:
+            if self._turn_done.get(session_id):
+                logging.info(
+                    'skipped late session/prompt row: session=%s request=%s (agent_stopped already recorded)',
+                    session_id, pending['request_id'],
+                )
+                return
 
         stop_reason = None
         error_message = None
@@ -578,6 +592,10 @@ class Tracker:
              duration_ms, stop_reason, None,
              model_display_name, reasoning_effort, 'local'),
         )
+
+        # Mark turn as done so any late session/prompt response skips its numeric row.
+        with self._lock:
+            self._turn_done[session_id] = True
 
         # Update session metadata with final model / display name.
         if model or model_display_name or reasoning_effort:

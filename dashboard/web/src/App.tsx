@@ -17,6 +17,7 @@ import {
   getSessionDetail,
   getPerformance,
   resetAllData,
+  reprocessLog,
 } from '@/api'
 import type {
   Period,
@@ -28,7 +29,7 @@ import type {
   SessionDetail as SessionDetailData,
   Performance,
 } from '@/types'
-import { Trash2 } from 'lucide-react'
+import { Trash2, RefreshCw } from 'lucide-react'
 
 export default function App() {
   const [period, setPeriod] = useState<Period>('7d')
@@ -93,6 +94,21 @@ export default function App() {
     }
   }, [loadDashboard])
 
+  const handleReprocess = useCallback(async () => {
+    setLoading(true)
+    try {
+      const result = await reprocessLog()
+      const msg = `Reprocessed ${result.processed} events, inserted ${result.inserted}, removed ${result.deleted_duplicates} duplicates.`
+      alert(msg)
+      await loadDashboard()
+    } catch (e) {
+      console.error('reprocess error', e)
+      alert('Reprocess failed: ' + String(e))
+    } finally {
+      setLoading(false)
+    }
+  }, [loadDashboard])
+
   if (selectedSession && sessionDetail) {
     return (
       <div className="min-h-screen bg-background p-6 max-w-7xl mx-auto">
@@ -117,6 +133,15 @@ export default function App() {
               <ModelFilter models={models} value={modelFilter} onChange={setModelFilter} />
             )}
             <PeriodSelector value={period} onChange={setPeriod} />
+            <button
+              onClick={handleReprocess}
+              disabled={loading}
+              className="flex items-center gap-1.5 bg-secondary text-foreground text-xs rounded-md px-3 py-1.5 border border-border hover:bg-sky-500/10 hover:border-sky-500/50 hover:text-sky-400 transition-colors disabled:opacity-50"
+              title="Re-read wrapper.log and fix usage rows from agent_stopped events"
+            >
+              <RefreshCw size={12} />
+              Reprocess
+            </button>
             <button
               onClick={handleReset}
               className="flex items-center gap-1.5 bg-secondary text-foreground text-xs rounded-md px-3 py-1.5 border border-border hover:bg-red-500/10 hover:border-red-500/50 hover:text-red-400 transition-colors"

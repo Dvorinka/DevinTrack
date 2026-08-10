@@ -515,6 +515,184 @@ def api_session_detail(session_id: str):
     }
 
 
+# ---------------------------------------------------------------------------
+# Reprocessor: re-read wrapper.log for agent_stopped events and fix usage rows.
+# Handles mid-session upgrades, missed events, and duplicate numeric rows.
+# ---------------------------------------------------------------------------
+
+def _parse_agent_stopped_events(log_path):
+    """Parse wrapper.log and return {(session_id, request_id): (params, log_ts)} for agent_stopped.
+
+    log_ts is the timestamp from the log line (ISO format), used for time-proximity
+    matching against numeric session/prompt rows in the DB.
+    """
+    events = {}
+    with open(log_path) as f:
+        for line in f:
+            if '"_cognition.ai/agent_stopped"' not in line:
+                continue
+            idx = line.find('{')
+            if idx < 0:
+                continue
+            try:
+                obj = json.loads(line[idx:])
+            except json.JSONDecodeError:
+                continue
+            if obj.get('method') != '_cognition.ai/agent_stopped':
+                continue
+            params = obj.get('params') or {}
+            session_id = params.get('sessionId')
+            stats = params.get('stats') or {}
+            request_id = stats.get('requestId')
+            if not session_id or not request_id:
+                continue
+            # Parse log line timestamp: "2026-08-10 07:32:51,123 INFO ..."
+            # The logging module uses local time; convert to UTC for DB comparison.
+            log_ts = None
+            try:
+                raw_ts = line[:23].strip()
+                dt = datetime.strptime(raw_ts, '%Y-%m-%d %H:%M:%S,%f')
+                dt = dt.astimezone(timezone.utc)
+                log_ts = dt.isoformat()
+            except (ValueError, IndexError):
+                pass
+            # Last occurrence wins (cumulative counts may update).
+            events[(session_id, request_id)] = (params, log_ts)
+    return events
+
+
+def _dim_value(dims, uid, default=0):
+    dim = dims.get(uid)
+    if not isinstance(dim, dict):
+        return default
+    kind = dim.get('kind') or {}
+    val = kind.get('value')
+    try:
+        return int(val) if val is not None else default
+    except (TypeError, ValueError):
+        return default
+
+
+def reprocess_wrapper_log():
+    """Re-read wrapper.log for agent_stopped events and replace corresponding usage rows.
+
+    Also deletes duplicate numeric session/prompt rows that have a UUID counterpart
+    with identical token counts for the same session.
+    """
+    log_path = data_dir() / 'wrapper.log'
+    if not log_path.exists():
+        return {'ok': False, 'error': 'wrapper.log not found'}
+
+    events = _parse_agent_stopped_events(log_path)
+    if not events:
+        return {'ok': True, 'processed': 0, 'inserted': 0, 'deleted_duplicates': 0,
+                'sessions_affected': []}
+
+    processed = 0
+    inserted = 0
+    deleted_duplicates = 0
+    sessions_affected = set()
+
+    with sqlite3.connect(db_path()) as conn:
+        # Phase 1: delete stale numeric rows that are duplicates of agent_stopped
+        # events. Uses the LOG timestamp (not DB timestamp) for time proximity,
+        # because DB UUID rows may have been overwritten by a previous reprocess
+        # run. The log timestamp is the original event time.
+        # ±120s window catches the race condition where session/prompt (per-call
+        # tokens) arrived shortly after agent_stopped (cumulative tokens).
+        sessions_with_events = set(sid for (sid, _) in events)
+        for sid in sessions_with_events:
+            for (eid_sid, eid_rid), (params, log_ts) in events.items():
+                if eid_sid != sid or not log_ts:
+                    continue
+                cur = conn.execute(
+                    """DELETE FROM usage
+                       WHERE session_id = ?
+                         AND request_id NOT GLOB '*-*'
+                         AND ABS(strftime('%s', timestamp) - strftime('%s', ?)) <= 120""",
+                    (sid, log_ts),
+                )
+                deleted_duplicates += cur.rowcount
+
+        # Phase 2: re-insert UUID rows from agent_stopped events.
+        for (session_id, request_id), (params, log_ts) in events.items():
+            stats = params.get('stats') or {}
+            dims = {
+                d.get('uid'): d
+                for d in (stats.get('responseDimensions') or [])
+                if isinstance(d, dict)
+            }
+
+            input_new = _dim_value(dims, 'input_tokens')
+            output = _dim_value(dims, 'output_tokens')
+            cached = _dim_value(dims, 'cached_input_tokens')
+            input_gross = input_new + cached
+            total = input_gross + output
+
+            cause = params.get('cause') or 'complete'
+            stop_reason = 'end_turn' if cause == 'complete' else cause
+            duration_ms = stats.get('totalTimeMs') or 0
+
+            # Model metadata from sessions table.
+            row = conn.execute(
+                'SELECT model, model_display_name, reasoning_effort FROM sessions WHERE session_id = ?',
+                (session_id,),
+            ).fetchone()
+            model = row[0] if row else None
+            model_display_name = row[1] if row else None
+            reasoning_effort = row[2] if row else None
+
+            # Try model from responseDimensions / modelLabel.
+            dim_model = None
+            dim = dims.get('model')
+            if isinstance(dim, dict):
+                kind = dim.get('kind') or {}
+                dim_model = kind.get('value')
+            model_label = stats.get('modelLabel') or dim_model
+            if model_label:
+                model_display_name = model_label
+                label_dashed = model_label.lower().replace(' ', '-')
+                for suffix in _EFFORT_SUFFIXES:
+                    if label_dashed.endswith('-' + suffix):
+                        reasoning_effort = suffix
+                        break
+                if not model:
+                    model = label_dashed
+
+            # Delete existing rows for this (session_id, request_id) and insert corrected.
+            conn.execute(
+                'DELETE FROM usage WHERE session_id = ? AND request_id = ?',
+                (session_id, request_id),
+            )
+            conn.execute(
+                """INSERT INTO usage
+                   (timestamp, session_id, request_id, model,
+                    input_tokens, output_tokens, total_tokens,
+                    cached_read_tokens, cached_write_tokens,
+                    duration_ms, stop_reason, error_message,
+                    model_display_name, reasoning_effort, source)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (datetime.now(timezone.utc).isoformat(), session_id, request_id, model,
+                 input_gross, output, total,
+                 cached, 0,
+                 duration_ms, stop_reason, None,
+                 model_display_name, reasoning_effort, 'local'),
+            )
+            inserted += 1
+            sessions_affected.add(session_id)
+            processed += 1
+
+        conn.commit()
+
+    return {
+        'ok': True,
+        'processed': processed,
+        'inserted': inserted,
+        'deleted_duplicates': deleted_duplicates,
+        'sessions_affected': sorted(sessions_affected),
+    }
+
+
 def _and(where: str, extra: str) -> str:
     """Append an AND condition to a WHERE clause, handling empty where."""
     if where:
@@ -759,11 +937,17 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({'error': 'invalid JSON'}, 400)
             result = api_ingest(payload)
             return self._json(result)
+        if path == '/api/reprocess':
+            return self._json(reprocess_wrapper_log())
         return self._json({'error': 'not found'}, 404)
 
 
 def main():
     ensure_db_columns()
+    if '--reprocess' in sys.argv:
+        result = reprocess_wrapper_log()
+        print(json.dumps(result, indent=2))
+        return
     port = int(os.environ.get('DEVIN_TRACK_PORT', '7841'))
     server = HTTPServer(('127.0.0.1', port), Handler)
     print(f'DevinTrack dashboard on http://127.0.0.1:{port}')

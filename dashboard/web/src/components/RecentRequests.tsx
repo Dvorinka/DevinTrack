@@ -31,10 +31,10 @@ export function RecentRequests({
               <Th>Time</Th>
               <Th>Model</Th>
               <Th>Session</Th>
-              <Th className="text-right">Input</Th>
+              <Th className="text-right">New input</Th>
               <Th className="text-right">Output</Th>
-              <Th className="text-right">Total</Th>
-              <Th className="text-right">Cached</Th>
+              <Th className="text-right">Billable</Th>
+              <Th className="text-right">Cache reads</Th>
               <Th className="text-right">Cost</Th>
               <Th className="text-right">Duration</Th>
               <Th>Stop</Th>

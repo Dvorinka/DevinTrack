@@ -99,15 +99,15 @@ export function SessionDetail({
           <div className="font-mono text-xl font-semibold tabular-nums text-blue-400">{formatTokens(t.new_input_tokens)}</div>
         </Card>
         <Card className="p-4">
-          <div className="text-xs text-muted-foreground mb-1">Total output</div>
+          <div className="text-xs text-muted-foreground mb-1">Output</div>
           <div className="font-mono text-xl font-semibold tabular-nums text-emerald-400">{formatTokens(t.output_tokens)}</div>
         </Card>
         <Card className="p-4">
-          <div className="text-xs text-muted-foreground mb-1">Total tokens</div>
+          <div className="text-xs text-muted-foreground mb-1">Billable total</div>
           <div className="font-mono text-xl font-semibold tabular-nums text-amber-400">{formatTokens(t.total_tokens)}</div>
         </Card>
         <Card className="p-4">
-          <div className="text-xs text-muted-foreground mb-1">Cached read</div>
+          <div className="text-xs text-muted-foreground mb-1">Cache reads</div>
           <div className="font-mono text-xl font-semibold tabular-nums text-purple-400">{formatTokens(t.cached_read_tokens)}</div>
         </Card>
       </div>
@@ -123,10 +123,10 @@ export function SessionDetail({
                 <Th>Time</Th>
                 <Th>Req ID</Th>
                 <Th>Model</Th>
-                <Th className="text-right">Input</Th>
+                <Th className="text-right">New input</Th>
                 <Th className="text-right">Output</Th>
-                <Th className="text-right">Total</Th>
-                <Th className="text-right">Cached</Th>
+                <Th className="text-right">Billable</Th>
+                <Th className="text-right">Cache reads</Th>
                 <Th className="text-right">Cost</Th>
                 <Th className="text-right">Duration</Th>
                 <Th>Stop</Th>

@@ -50,3 +50,15 @@ export async function resetAllData(): Promise<{ ok: boolean; message: string }> 
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
   return res.json()
 }
+
+export async function reprocessLog(): Promise<{
+  ok: boolean
+  processed: number
+  inserted: number
+  deleted_duplicates: number
+  sessions_affected: string[]
+}> {
+  const res = await fetch(`${BASE}/reprocess`, { method: 'POST' })
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+  return res.json()
+}

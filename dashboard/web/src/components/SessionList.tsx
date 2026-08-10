@@ -60,10 +60,10 @@ export function SessionList({
               <Th>Reasoning</Th>
               <Th>Source</Th>
               <Th className="text-right">Prompts</Th>
-              <Th className="text-right">Input</Th>
+              <Th className="text-right">New input</Th>
               <Th className="text-right">Output</Th>
-              <Th className="text-right">Total</Th>
-              <Th className="text-right">Cached</Th>
+              <Th className="text-right">Billable</Th>
+              <Th className="text-right">Cache reads</Th>
               <Th className="text-right">Cost</Th>
               <Th className="text-right">Duration</Th>
               <Th>Updated</Th>
