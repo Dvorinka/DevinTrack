@@ -1307,17 +1307,7 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute('DELETE FROM usage')
                 conn.execute('DELETE FROM sessions')
                 conn.commit()
-            # Auto-reprocess so data comes back from wrapper.log immediately.
-            try:
-                result = reprocess_wrapper_log()
-                return self._json({
-                    'ok': True,
-                    'message': 'all data cleared and reprocessed',
-                    'reprocessed': result.get('processed', 0),
-                    'sessions_created': result.get('sessions_created', 0),
-                })
-            except Exception as e:
-                return self._json({'ok': True, 'message': 'all data cleared (reprocess failed)', 'error': str(e)})
+            return self._json({'ok': True, 'message': 'all data cleared'})
         return self._json({'error': 'not found'}, 404)
 
     def do_POST(self):
