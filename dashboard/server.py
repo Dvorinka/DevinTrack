@@ -36,6 +36,40 @@ def load_pricing():
     return _PRICING
 
 
+# ---------------------------------------------------------------------------
+# Reprocess offset tracking — prevents reprocessing data that was reset.
+# On reset, the offset advances to the end of wrapper.log so old events
+# are never re-inserted. Only new events after the reset are processed.
+# ---------------------------------------------------------------------------
+
+def _reprocess_state_path():
+    return data_dir() / 'reprocess_state.json'
+
+
+def _get_reprocess_offset():
+    """Return the byte offset to start reading wrapper.log from."""
+    p = _reprocess_state_path()
+    if p.exists():
+        try:
+            with open(p) as f:
+                return json.load(f).get('last_offset', 0)
+        except (json.JSONDecodeError, KeyError):
+            pass
+    return 0
+
+
+def _set_reprocess_offset(offset):
+    with open(_reprocess_state_path(), 'w') as f:
+        json.dump({'last_offset': offset}, f)
+
+
+def _advance_reprocess_to_end():
+    """Set offset to current end of wrapper.log. Called on reset."""
+    log_path = data_dir() / 'wrapper.log'
+    offset = log_path.stat().st_size if log_path.exists() else 0
+    _set_reprocess_offset(offset)
+
+
 def estimate_cost(model, input_tokens, output_tokens, cached_read_tokens, cached_write_tokens=0):
     """Estimate USD cost for a request based on model pricing.
     Returns None if model is unknown.
@@ -605,16 +639,19 @@ def _extract_model_from_config(config_options):
     return None
 
 
-def _parse_session_metadata(log_path):
+def _parse_session_metadata(log_path, offset=0):
     """Parse wrapper.log for session/new, session/load requests and responses.
 
     Returns {session_id: {cwd, model, model_display_name, reasoning_effort, description, created_at}}.
+    Only reads from byte offset onwards.
     """
     sessions = {}
     # Map request id -> cwd for session/new (sessionId not known until response).
     pending_cwd = {}
 
     with open(log_path) as f:
+        if offset > 0:
+            f.seek(offset)
         for line in f:
             # Parse request lines: "INFO request method=session/new params={...}"
             if 'INFO request method=session/new' in line or 'INFO request method=session/load' in line:
@@ -734,14 +771,17 @@ def _parse_session_metadata(log_path):
     return sessions
 
 
-def _parse_prompt_requests(log_path):
+def _parse_prompt_requests(log_path, offset=0):
     """Parse wrapper.log for session/prompt requests.
 
     Returns {session_id: [(log_ts, prompt_text), ...]} ordered by timestamp.
     The first entry for a session is the first_prompt.
+    Only reads from byte offset onwards.
     """
     prompts = {}
     with open(log_path) as f:
+        if offset > 0:
+            f.seek(offset)
         for line in f:
             if 'request method=session/prompt' not in line:
                 continue
@@ -810,14 +850,17 @@ def extract_model_display_name_from_config(raw_json, model):
                     return rest3[1:end]
     return None
 
-def _parse_agent_stopped_events(log_path):
+def _parse_agent_stopped_events(log_path, offset=0):
     """Parse wrapper.log and return {(session_id, request_id): (params, log_ts)} for agent_stopped.
 
     log_ts is the timestamp from the log line (ISO format), used for time-proximity
     matching against numeric session/prompt rows in the DB.
+    Only reads from byte offset onwards (to skip already-processed/reset data).
     """
     events = {}
     with open(log_path) as f:
+        if offset > 0:
+            f.seek(offset)
         for line in f:
             if '"_cognition.ai/agent_stopped"' not in line:
                 continue
@@ -866,22 +909,25 @@ def _dim_value(dims, uid, default=0):
 def reprocess_wrapper_log():
     """Re-read wrapper.log for agent_stopped events and replace corresponding usage rows.
 
-    Also deletes duplicate numeric session/prompt rows that have a UUID counterpart
-    with identical token counts for the same session.
+    Only processes log entries after the last recorded offset. On reset,
+    the offset advances to end-of-file so old data is never re-inserted.
     """
     log_path = data_dir() / 'wrapper.log'
     if not log_path.exists():
         return {'ok': False, 'error': 'wrapper.log not found'}
 
-    events = _parse_agent_stopped_events(log_path)
+    offset = _get_reprocess_offset()
+    events = _parse_agent_stopped_events(log_path, offset)
     if not events:
+        # No new events — save offset to current end of file.
+        _set_reprocess_offset(log_path.stat().st_size)
         return {'ok': True, 'processed': 0, 'inserted': 0, 'deleted_duplicates': 0,
                 'sessions_affected': [], 'sessions_created': 0}
 
     # Parse session metadata from the log (cwd, model, description, etc.).
-    session_meta = _parse_session_metadata(log_path)
+    session_meta = _parse_session_metadata(log_path, offset)
     # Parse session/prompt requests for first_prompt and per-request prompt text.
-    prompt_data = _parse_prompt_requests(log_path)
+    prompt_data = _parse_prompt_requests(log_path, offset)
 
     processed = 0
     inserted = 0
@@ -1064,6 +1110,9 @@ def reprocess_wrapper_log():
             processed += 1
 
         conn.commit()
+
+    # Save offset to current end of file so we don't reprocess these events again.
+    _set_reprocess_offset(log_path.stat().st_size)
 
     return {
         'ok': True,
@@ -1307,6 +1356,9 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute('DELETE FROM usage')
                 conn.execute('DELETE FROM sessions')
                 conn.commit()
+            # Advance reprocess offset to end of wrapper.log so old
+            # events are not re-inserted on next reprocess.
+            _advance_reprocess_to_end()
             return self._json({'ok': True, 'message': 'all data cleared'})
         return self._json({'error': 'not found'}, 404)
 
