@@ -70,6 +70,7 @@ export interface UsageRow {
   error_message: string | null
   estimated_cost: number
   source: string
+  reasoning_effort: string | null
 }
 
 export interface SessionSummary {

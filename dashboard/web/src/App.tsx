@@ -8,6 +8,7 @@ import { PerformanceMetrics } from '@/components/PerformanceMetrics'
 import { SessionList } from '@/components/SessionList'
 import { SessionDetail } from '@/components/SessionDetail'
 import { ModelFilter } from '@/components/ModelFilter'
+import { CwdFilter } from '@/components/CwdFilter'
 import {
   getOverview,
   getTimeseries,
@@ -18,7 +19,9 @@ import {
   getPerformance,
   resetAllData,
   reprocessLog,
+  getCwdList,
 } from '@/api'
+import type { CwdEntry } from '@/api'
 import type {
   Period,
   Overview,
@@ -34,11 +37,13 @@ import { Trash2, RefreshCw } from 'lucide-react'
 export default function App() {
   const [period, setPeriod] = useState<Period>('7d')
   const [modelFilter, setModelFilter] = useState<string>('all')
+  const [cwdFilter, setCwdFilter] = useState<string>('all')
   const [overview, setOverview] = useState<Overview | null>(null)
   const [timeseries, setTimeseries] = useState<TimeSeriesPoint[]>([])
   const [models, setModels] = useState<ModelData[]>([])
   const [recent, setRecent] = useState<UsageRow[]>([])
   const [sessions, setSessions] = useState<SessionSummary[]>([])
+  const [cwdList, setCwdList] = useState<CwdEntry[]>([])
   const [perf, setPerf] = useState<Performance | null>(null)
   const [selectedSession, setSelectedSession] = useState<string | null>(null)
   const [sessionDetail, setSessionDetail] = useState<SessionDetailData | null>(null)
@@ -47,13 +52,14 @@ export default function App() {
   const loadDashboard = useCallback(async () => {
     setLoading(true)
     try {
-      const [ov, ts, md, re, se, pf] = await Promise.all([
+      const [ov, ts, md, re, se, pf, cwds] = await Promise.all([
         getOverview(period, modelFilter),
         getTimeseries(period, modelFilter),
         getModels(period),
         getRecent(30, modelFilter),
-        getSessions(),
+        getSessions(cwdFilter),
         getPerformance(period),
+        getCwdList(),
       ])
       setOverview(ov)
       setTimeseries(ts)
@@ -61,12 +67,13 @@ export default function App() {
       setRecent(re)
       setSessions(se)
       setPerf(pf)
+      setCwdList(cwds)
     } catch (e) {
       console.error('load error', e)
     } finally {
       setLoading(false)
     }
-  }, [period, modelFilter])
+  }, [period, modelFilter, cwdFilter])
 
   useEffect(() => {
     loadDashboard()
@@ -131,6 +138,9 @@ export default function App() {
           <div className="flex items-center gap-3">
             {models.length > 0 && (
               <ModelFilter models={models} value={modelFilter} onChange={setModelFilter} />
+            )}
+            {cwdList.length > 0 && (
+              <CwdFilter cwdList={cwdList} value={cwdFilter} onChange={setCwdFilter} />
             )}
             <PeriodSelector value={period} onChange={setPeriod} />
             <button

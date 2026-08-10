@@ -33,8 +33,8 @@ export function getRecent(limit = 20, model: string = 'all'): Promise<UsageRow[]
   return fetchJSON(`${BASE}/recent?limit=${limit}&model=${model}`)
 }
 
-export function getSessions(): Promise<SessionSummary[]> {
-  return fetchJSON(`${BASE}/sessions`)
+export function getSessions(cwdFilter: string = 'all'): Promise<SessionSummary[]> {
+  return fetchJSON(`${BASE}/sessions?cwd=${encodeURIComponent(cwdFilter)}`)
 }
 
 export function getSessionDetail(id: string): Promise<SessionDetail> {
@@ -61,4 +61,14 @@ export async function reprocessLog(): Promise<{
   const res = await fetch(`${BASE}/reprocess`, { method: 'POST' })
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
   return res.json()
+}
+
+export interface CwdEntry {
+  cwd: string
+  session_count: number
+  prompt_count: number
+}
+
+export function getCwdList(): Promise<CwdEntry[]> {
+  return fetchJSON(`${BASE}/cwd_list`)
 }

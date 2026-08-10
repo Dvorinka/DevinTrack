@@ -197,8 +197,9 @@ def where_clause(period: str, model_filter: str = None):
             conditions.append(f'{col} < datetime(?)')
             params.append(end.isoformat())
     if model_filter and model_filter != 'all':
-        conditions.append("REPLACE(LOWER(model), '.', '-') = ?")
-        params.append(model_filter.replace('.', '-').lower())
+        # Prefix match: base model key "swe-1-7" matches "swe-1-7-max" too.
+        conditions.append("REPLACE(LOWER(model), '.', '-') LIKE ?")
+        params.append(model_filter.replace('.', '-').lower() + '%')
     if conditions:
         return 'WHERE ' + ' AND '.join(conditions), params
     return '', []
@@ -245,10 +246,12 @@ def api_overview(period: str, model_filter: str = None):
 def api_timeseries(period: str, model_filter: str = None):
     where, params = where_clause(period, model_filter)
     # Use hourly granularity for today/yesterday, daily for longer periods.
+    # Convert UTC timestamps to local time for bucketing so the chart
+    # shows hours/days in the user's timezone.
     if period in ('today', 'yesterday'):
-        bucket = "strftime('%Y-%m-%d %H:00', timestamp)"
+        bucket = "strftime('%Y-%m-%d %H:00', datetime(timestamp, 'localtime'))"
     else:
-        bucket = "date(timestamp)"
+        bucket = "date(datetime(timestamp, 'localtime'))"
     sql = f"""
         SELECT
             {bucket} as bucket,
@@ -400,14 +403,15 @@ def api_recent(limit: int = 20, model_filter: str = None):
     where = ''
     params = []
     if model_filter and model_filter != 'all':
-        # Match both dot and dash variants (e.g. "glm-5-2" matches "glm-5.2").
-        where = "WHERE REPLACE(LOWER(model), '.', '-') = ?"
-        params = [model_filter.replace('.', '-').lower()]
+        # Prefix match: base model key "swe-1-7" matches "swe-1-7-max" too.
+        where = "WHERE REPLACE(LOWER(model), '.', '-') LIKE ?"
+        params = [model_filter.replace('.', '-').lower() + '%']
     sql = f"""
         SELECT id, timestamp, session_id, request_id, model, model_display_name,
                input_tokens, output_tokens, total_tokens,
                cached_read_tokens, cached_write_tokens,
-               duration_ms, stop_reason, error_message, source
+               duration_ms, stop_reason, error_message, source,
+               reasoning_effort
         FROM usage {where}
         ORDER BY id DESC
         LIMIT ?
@@ -434,13 +438,19 @@ def api_recent(limit: int = 20, model_filter: str = None):
             'error_message': r[13],
             'estimated_cost': estimate_cost(r[4], r[6], r[7], r[9], r[10]) or 0,
             'source': r[14] or 'local',
+            'reasoning_effort': resolve_effort(r[15], r[4]),
         }
         for r in rows
     ]
 
 
-def api_sessions():
-    sql = """
+def api_sessions(cwd_filter: str = None):
+    where = ''
+    params = []
+    if cwd_filter and cwd_filter != 'all':
+        where = 'WHERE s.cwd = ?'
+        params = [cwd_filter]
+    sql = f"""
         SELECT
             s.session_id,
             s.created_at,
@@ -460,12 +470,13 @@ def api_sessions():
             s.source
         FROM sessions s
         LEFT JOIN usage u ON u.session_id = s.session_id
+        {where}
         GROUP BY s.session_id
         HAVING COUNT(u.id) > 0
         ORDER BY s.updated_at DESC
     """
     with sqlite3.connect(db_path()) as conn:
-        rows = conn.execute(sql).fetchall()
+        rows = conn.execute(sql, params).fetchall()
     return [
         {
             'session_id': r[0],
@@ -487,6 +498,23 @@ def api_sessions():
             'estimated_cost': estimate_cost(r[3], r[10], r[11], r[13]) or 0,
             'source': r[15] or 'local',
         }
+        for r in rows
+    ]
+
+
+def api_cwd_list():
+    """Return distinct cwd values with session and prompt counts for filtering."""
+    with sqlite3.connect(db_path()) as conn:
+        rows = conn.execute(
+            """SELECT s.cwd, COUNT(DISTINCT s.session_id), COALESCE(SUM(u.id), 0)
+               FROM sessions s
+               LEFT JOIN usage u ON u.session_id = s.session_id
+               WHERE s.cwd IS NOT NULL AND s.cwd != ''
+               GROUP BY s.cwd
+               ORDER BY s.cwd"""
+        ).fetchall()
+    return [
+        {'cwd': r[0], 'session_count': r[1], 'prompt_count': r[2]}
         for r in rows
     ]
 
@@ -1178,7 +1206,10 @@ class Handler(BaseHTTPRequestHandler):
                 limit = min(int(qs.get('limit', ['20'])[0]), 200)
                 return self._json(api_recent(limit, model_filter))
             if path == '/api/sessions':
-                return self._json(api_sessions())
+                cwd_filter = qs.get('cwd', ['all'])[0]
+                return self._json(api_sessions(cwd_filter))
+            if path == '/api/cwd_list':
+                return self._json(api_cwd_list())
             if path.startswith('/api/sessions/'):
                 sid = path.split('/')[-1]
                 detail = api_session_detail(sid)
@@ -1226,6 +1257,12 @@ def main():
         result = reprocess_wrapper_log()
         print(json.dumps(result, indent=2))
         return
+    # Auto-reprocess wrapper.log at startup so the dashboard always
+    # has the latest agent_stopped data without user intervention.
+    try:
+        reprocess_wrapper_log()
+    except Exception:
+        pass  # non-fatal: log may not exist yet
     port = int(os.environ.get('DEVIN_TRACK_PORT', '7841'))
     server = HTTPServer(('127.0.0.1', port), Handler)
     print(f'DevinTrack dashboard on http://127.0.0.1:{port}')

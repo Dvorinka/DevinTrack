@@ -85,3 +85,17 @@ export function modelColor(model: string | null | undefined): ModelColor {
   for (let i = 0; i < model.length; i++) hash = (hash * 31 + model.charCodeAt(i)) | 0
   return fallbackColors[Math.abs(hash) % fallbackColors.length]
 }
+
+// Strip reasoning effort suffix from display name.
+// "SWE-1.7 Max" -> "SWE-1.7", "GLM-5.2 High" -> "GLM-5.2".
+const EFFORT_WORDS = ['XHigh', 'Medium', 'High', 'Low', 'Max', 'None']
+
+export function baseModelName(displayName: string | null | undefined): string {
+  if (!displayName) return '-'
+  for (const word of EFFORT_WORDS) {
+    if (displayName.endsWith(' ' + word)) {
+      return displayName.slice(0, -(word.length + 1))
+    }
+  }
+  return displayName
+}

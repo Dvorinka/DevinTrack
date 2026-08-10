@@ -2,7 +2,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/ui/card'
 import { Button } from '@/ui/button'
 import { Badge } from '@/ui/badge'
 import { Table, Th, Td, Tr } from '@/ui/table'
-import { formatTokens, formatMs, formatTime, formatDate, formatCost, modelColor } from '@/lib/utils'
+import { formatTokens, formatMs, formatTime, formatDate, formatCost, modelColor, baseModelName } from '@/lib/utils'
 import { ReasoningBadge } from '@/components/ReasoningBadge'
 import { SourceBadge } from '@/components/SourceBadge'
 import type { SessionDetail } from '@/types'
@@ -40,14 +40,14 @@ export function SessionDetail({
         </div>
         {data.model && (
           <Badge className={mc.text}>
-            {data.model_display_name ?? data.model}
+            {baseModelName(data.model_display_name ?? data.model)}
           </Badge>
         )}
         <ReasoningBadge effort={data.reasoning_effort} />
         <SourceBadge source={data.source} />
       </div>
 
-      {(data.description || data.first_prompt) && (
+      {(data.description || data.first_prompt || data.cwd) && (
         <Card className="p-4">
           {data.description && (
             <div className="mb-2">
@@ -64,7 +64,7 @@ export function SessionDetail({
           {data.cwd && (
             <div>
               <div className="text-xs text-muted-foreground mb-1">Working directory</div>
-              <div className="text-xs font-mono text-muted-foreground">{data.cwd}</div>
+              <div className="text-xs font-mono text-amber-400/80">{data.cwd}</div>
             </div>
           )}
         </Card>
