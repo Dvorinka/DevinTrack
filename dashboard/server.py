@@ -476,7 +476,7 @@ def api_session_detail(session_id: str):
             'model': r[3],
             'model_display_name': resolve_display_name(r[4], r[3]),
             'input_tokens': r[5],
-            'new_input_tokens': max(r[5] - r[9], 0) if r[5] else 0,
+            'new_input_tokens': max(r[5] - r[8], 0) if r[5] else 0,
             'output_tokens': r[6],
             'total_tokens': r[7],
             'cached_read_tokens': r[8],
