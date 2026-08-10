@@ -216,6 +216,8 @@ class Tracker:
         self._lock = threading.Lock()
         # id -> {session_id, request_id, start}
         self._pending = {}
+        # session_id -> {'iso': str, 'perf': float} for the first session/prompt in the current turn.
+        self._turn_start = {}
 
     def _execute(self, *args, **kwargs):
         with self._lock:
@@ -313,6 +315,13 @@ class Tracker:
                         'request_id': str(msg_id),
                         'start': time.perf_counter(),
                     }
+                    # Mark the start of a new agent turn so agent_stopped can
+                    # clean up intermediate session/prompt rows.
+                    if session_id not in self._turn_start:
+                        self._turn_start[session_id] = {
+                            'iso': iso_now(),
+                            'perf': time.perf_counter(),
+                        }
 
     def on_response(self, line_bytes: bytes):
         obj, _ = maybe_json(line_bytes)
@@ -331,6 +340,9 @@ class Tracker:
         method = obj.get('method')
         if method:
             logging.info('response method=%s: %s', method, json.dumps(obj, ensure_ascii=False)[:2000])
+
+        if method == '_cognition.ai/agent_stopped':
+            self.handle_agent_stopped(obj)
 
         # session/new, session/resume, etc. expose the model in their result.
         if isinstance(result, dict) and 'sessionId' in result:
@@ -433,6 +445,144 @@ class Tracker:
             session_id, pending['request_id'], input_tokens, output_tokens,
             total_tokens, cached_read_tokens, cached_write_tokens,
             duration_ms, stop_reason,
+        )
+
+    def handle_agent_stopped(self, obj):
+        """Record final cumulative usage from _cognition.ai/agent_stopped.
+
+        The per-call 'usage' object inside session/prompt responses only covers
+        the final model inference. The agent_stopped notification carries
+        responseDimensions with the cumulative token counts shown in the Devin UI.
+        """
+        params = obj.get('params') or {}
+        stats = params.get('stats') or {}
+        session_id = params.get('sessionId')
+        if not session_id:
+            return
+
+        # Build a uid -> dimension lookup.
+        dims = {
+            d.get('uid'): d
+            for d in (stats.get('responseDimensions') or [])
+            if isinstance(d, dict)
+        }
+
+        def _dim_value(uid, default=0):
+            dim = dims.get(uid)
+            if not isinstance(dim, dict):
+                return default
+            kind = dim.get('kind') or {}
+            val = kind.get('value')
+            try:
+                return int(val) if val is not None else default
+            except (TypeError, ValueError):
+                return default
+
+        input_new = _dim_value('input_tokens')
+        output = _dim_value('output_tokens')
+        cached = _dim_value('cached_input_tokens')
+
+        # responseDimensions.input_tokens is *new* input, while
+        # cached_input_tokens is the cached portion. Store gross input so the
+        # server can compute new_input_tokens = input - cached.
+        input_gross = input_new + cached
+        total = input_gross + output
+
+        cause = params.get('cause') or 'complete'
+        stop_reason = 'end_turn' if cause == 'complete' else cause
+
+        request_id = stats.get('requestId') or 'unknown'
+
+        with self._lock:
+            turn_start = self._turn_start.pop(session_id, None)
+
+        # Wall-clock turn duration is more useful than the final-call totalTimeMs.
+        if turn_start:
+            duration_ms = int((time.perf_counter() - turn_start['perf']) * 1000)
+        else:
+            duration_ms = stats.get('totalTimeMs') or 0
+
+        # Model metadata: prefer the session's canonical model, fall back to
+        # modelLabel / responseDimensions model.
+        dim_model = None
+        dim = dims.get('model')
+        if isinstance(dim, dict):
+            kind = dim.get('kind') or {}
+            dim_model = kind.get('value')
+        model_label = stats.get('modelLabel') or dim_model
+
+        model = None
+        model_display_name = None
+        reasoning_effort = None
+        try:
+            row = self._execute(
+                'SELECT model, model_display_name, reasoning_effort FROM sessions WHERE session_id = ?',
+                (session_id,)
+            ).fetchone()
+            if row:
+                model = row[0]
+                model_display_name = row[1]
+                reasoning_effort = row[2]
+        except Exception:
+            pass
+
+        if model_label:
+            model_display_name = model_label
+            # Derive reasoning effort from a dashed form of the model label.
+            label_dashed = model_label.lower().replace(' ', '-')
+            reasoning_effort = extract_reasoning_effort(label_dashed) or reasoning_effort
+            if not model:
+                model = label_dashed
+
+        # Deduplicate on (session_id, request_id) in case agent_stopped is seen twice.
+        try:
+            self._execute(
+                'DELETE FROM usage WHERE session_id = ? AND request_id = ?',
+                (session_id, request_id)
+            )
+        except Exception:
+            pass
+
+        if turn_start:
+            # Remove intermediate session/prompt rows for this turn.
+            try:
+                self._execute(
+                    'DELETE FROM usage WHERE session_id = ? AND timestamp >= ?',
+                    (session_id, turn_start['iso'])
+                )
+            except Exception:
+                pass
+
+        self._execute(
+            """
+            INSERT INTO usage
+            (timestamp, session_id, request_id, model,
+             input_tokens, output_tokens, total_tokens,
+             cached_read_tokens, cached_write_tokens,
+             duration_ms, stop_reason, error_message,
+             model_display_name, reasoning_effort, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (iso_now(), session_id, request_id, model,
+             input_gross, output, total,
+             cached, 0,
+             duration_ms, stop_reason, None,
+             model_display_name, reasoning_effort, 'local'),
+        )
+
+        # Update session metadata with final model / display name.
+        if model or model_display_name or reasoning_effort:
+            self.upsert_session(
+                session_id,
+                model=model,
+                model_display_name=model_display_name,
+                reasoning_effort=reasoning_effort,
+            )
+
+        self._conn.commit()
+        logging.info(
+            'recorded agent_stopped: session=%s request=%s in=%d out=%d total=%d cached=%d ms=%d',
+            session_id, request_id, input_gross, output, total, cached, duration_ms
         )
 
 
