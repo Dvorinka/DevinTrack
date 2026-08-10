@@ -1165,10 +1165,10 @@ def api_performance(period: str):
     }
 
 def api_ingest(payload: dict):
-    """Receive usage + session entries from a remote source (e.g. Proxmox).
+    """Receive usage + session entries from a remote source.
 
     payload = {
-        "source": "proxmox",
+        "source": "remote",
         "usage": [ {timestamp, session_id, request_id, model, ...}, ... ],
         "sessions": [ {session_id, created_at, model, ...}, ... ],
     }

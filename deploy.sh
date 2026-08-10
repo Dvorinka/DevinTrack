@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DEVIN_BIN_DIR="/usr/share/devin-desktop/resources/app/extensions/windsurf/devin/bin"
-WRAPPER_SRC="/home/tdvorak/Desktop/PROG+HTML/DevinTrack/devin"
+DEVIN_BIN_DIR="${DEVIN_BIN_DIR:-/usr/share/devin-desktop/resources/app/extensions/windsurf/devin/bin}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+WRAPPER_SRC="${WRAPPER_SRC:-$SCRIPT_DIR/devin}"
 
 if [[ $EUID -ne 0 ]]; then
    echo "This script must be run as root (e.g. sudo ./deploy.sh)" >&2

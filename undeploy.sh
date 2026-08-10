@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DEVIN_BIN_DIR="/usr/share/devin-desktop/resources/app/extensions/windsurf/devin/bin"
+DEVIN_BIN_DIR="${DEVIN_BIN_DIR:-/usr/share/devin-desktop/resources/app/extensions/windsurf/devin/bin}"
 
 if [[ $EUID -ne 0 ]]; then
    echo "This script must be run as root" >&2

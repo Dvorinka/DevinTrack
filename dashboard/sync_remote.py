@@ -13,9 +13,11 @@ Usage:
     python3 sync_remote.py --dry        # show what would be synced
 
 Configuration via environment variables:
-    PROXMOX_HOST    - remote host (default: 10.34.237.151)
-    PROXMOX_USER    - SSH user (default: root)
-    PROXMOX_KEY     - SSH key path (default: ~/.ssh/proxmox_devin)
+    REMOTE_HOST     - remote host (no default, required)
+    REMOTE_USER     - SSH user (default: root)
+    REMOTE_KEY      - SSH key path (default: ~/.ssh/id_rsa)
+    REMOTE_DB_PATH  - path to usage.db on remote (default: ~/.local/share/devin_track/usage.db)
+    DEVIN_TRACK_SOURCE - source tag for synced entries (default: remote)
     DEVIN_TRACK_PORT - local dashboard port (default: 7841)
 
 jarvis: ceiling stdlib sync; if SSH fails, just log and move on.
@@ -55,9 +57,12 @@ def save_state(state: dict):
 
 
 def ssh_cmd() -> list:
-    host = os.environ.get('PROXMOX_HOST', '10.34.237.151')
-    user = os.environ.get('PROXMOX_USER', 'root')
-    key = os.environ.get('PROXMOX_KEY', os.path.expanduser('~/.ssh/proxmox_devin'))
+    host = os.environ.get('REMOTE_HOST', '')
+    if not host:
+        print('ERROR: REMOTE_HOST environment variable is required')
+        sys.exit(1)
+    user = os.environ.get('REMOTE_USER', 'root')
+    key = os.environ.get('REMOTE_KEY', os.path.expanduser('~/.ssh/id_rsa'))
     return ['ssh', '-o', 'ConnectTimeout=10', '-o', 'StrictHostKeyChecking=accept-new',
             '-i', key, f'{user}@{host}']
 
@@ -67,9 +72,10 @@ def remote_query(sql: str) -> list:
 
     Pipes the Python script via stdin to avoid shell quoting issues.
     """
+    remote_db = os.environ.get('REMOTE_DB_PATH', os.path.expanduser('~/.local/share/devin_track/usage.db'))
     script = (
         f"import json,sqlite3\n"
-        f"conn=sqlite3.connect('/root/.local/share/devin_track/usage.db')\n"
+        f"conn=sqlite3.connect({remote_db!r})\n"
         f"conn.row_factory=sqlite3.Row\n"
         f"rows=conn.execute({sql!r}).fetchall()\n"
         f"print(json.dumps([dict(r) for r in rows]))\n"
@@ -148,7 +154,7 @@ def sync_once(dry: bool = False) -> dict:
         return {'ok': True, 'inserted': 0, 'skipped': 0}
 
     payload = {
-        'source': 'proxmox',
+        'source': os.environ.get('DEVIN_TRACK_SOURCE', 'remote'),
         'usage': data['usage'],
         'sessions': data['sessions'],
     }
