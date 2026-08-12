@@ -100,6 +100,7 @@ All configuration is via environment variables. No config files needed.
 | Variable | Default | Description |
 |---|---|---|
 | `DEVIN_TRACK_PORT` | `7841` | Dashboard server port |
+| `DEVIN_TRACK_HOST` | `127.0.0.1` | Dashboard bind address. Set to `0.0.0.0` to expose to the local network |
 | `DEVIN_TRACK_REAL` | *(auto-detected)* | Path to the real `devin` binary |
 | `DEVIN_TRACK_SOURCE` | `local` | Source tag for locally captured entries |
 | `DEVIN_BIN_DIR` | *(auto-detected)* | Directory containing the Devin binary (deploy script) |
@@ -214,7 +215,7 @@ dashboard/
 | GET | `/api/timeseries` | Token usage over time |
 | GET | `/api/models` | Per-model breakdown |
 | GET | `/api/sessions` | Session list |
-| GET | `/api/session/{id}` | Session detail with requests |
+| GET | `/api/sessions/{id}` | Session detail with requests |
 | GET | `/api/recent` | Recent requests |
 | GET | `/api/performance` | Performance metrics |
 | GET | `/api/cwd_list` | Distinct working directories |

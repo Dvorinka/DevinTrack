@@ -196,25 +196,32 @@ PERIODS = ('today', 'yesterday', '7d', '30d', 'month', 'year', 'all')
 
 
 def period_bounds(period: str):
-    """Return (start_dt, end_dt) as timezone-aware datetimes, or (None, None) for all."""
-    now = datetime.now(timezone.utc)
+    """Return (start_dt, end_dt) as timezone-aware UTC datetimes, or (None, None) for all.
+
+    Day boundaries (today/yesterday/month/year) are computed in local time
+    then converted to UTC, so "today" means the user's calendar day, not the
+    UTC day. DB timestamps are stored in UTC.
+    """
+    now_utc = datetime.now(timezone.utc)
+    # Get local time for day-boundary calculations.
+    now_local = datetime.now().astimezone()
     if period == 'today':
-        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        return start, now
+        start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        return start_local.astimezone(timezone.utc), now_utc
     if period == 'yesterday':
-        start = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-        end = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        return start, end
+        start_local = (now_local - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        end_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        return start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
     if period == '7d':
-        return now - timedelta(days=7), now
+        return now_utc - timedelta(days=7), now_utc
     if period == '30d':
-        return now - timedelta(days=30), now
+        return now_utc - timedelta(days=30), now_utc
     if period == 'month':
-        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        return start, now
+        start_local = now_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        return start_local.astimezone(timezone.utc), now_utc
     if period == 'year':
-        start = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
-        return start, now
+        start_local = now_local.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        return start_local.astimezone(timezone.utc), now_utc
     return None, None  # all
 
 
@@ -398,6 +405,9 @@ def api_models(period: str):
         key = base_model_key(model)
         # Resolve reasoning effort: stored > fallback from model name.
         resolved_effort = resolve_effort(effort, model)
+        # Compute cost per-row using the full model name (not the base key),
+        # because pricing keys include effort suffixes (e.g. kimi-k3-high).
+        row_cost = estimate_cost(model, r[3], r[4], r[6]) or 0
         if key in merged:
             m = merged[key]
             m['input_tokens'] += r[3]
@@ -405,6 +415,7 @@ def api_models(period: str):
             m['total_tokens'] += r[5]
             m['cached_read_tokens'] += r[6]
             m['prompt_count'] += r[7]
+            m['_cost'] += row_cost
             # Track effort counts to pick the dominant one.
             ek = resolved_effort or 'none'
             m['_effort_counts'][ek] = m['_effort_counts'].get(ek, 0) + r[7]
@@ -417,13 +428,14 @@ def api_models(period: str):
                 'total_tokens': r[5],
                 'cached_read_tokens': r[6],
                 'prompt_count': r[7],
+                '_cost': row_cost,
                 '_effort_counts': {resolved_effort or 'none': r[7]},
             }
             merged[key] = m
     result = []
     for m in merged.values():
         m['new_input_tokens'] = max(m['input_tokens'] - m['cached_read_tokens'], 0) if m['input_tokens'] else 0
-        m['estimated_cost'] = estimate_cost(m['model'], m['input_tokens'], m['output_tokens'], m['cached_read_tokens']) or 0
+        m['estimated_cost'] = round(m.pop('_cost'), 4)
         # Pick the most common reasoning effort.
         effort_counts = m.pop('_effort_counts', {})
         best_effort = max(effort_counts, key=effort_counts.get) if effort_counts else None
@@ -479,12 +491,26 @@ def api_recent(limit: int = 20, model_filter: str = None):
     ]
 
 
-def api_sessions(cwd_filter: str = None):
-    where = ''
+def api_sessions(cwd_filter: str = None, period: str = 'all'):
+    conditions = []
     params = []
     if cwd_filter and cwd_filter != 'all':
-        where = 'WHERE s.cwd = ?'
-        params = [cwd_filter]
+        conditions.append('s.cwd = ?')
+        params.append(cwd_filter)
+    # Filter by period: a session belongs to a period if any of its
+    # usage rows fall within that period. This way a session that
+    # started yesterday but continued today shows up in both days.
+    if period and period != 'all':
+        start, end = period_bounds(period)
+        if start is not None:
+            sub = f"EXISTS (SELECT 1 FROM usage u2 WHERE u2.session_id = s.session_id AND datetime(u2.timestamp) >= datetime(?)"
+            params.append(start.isoformat())
+            if end is not None:
+                sub += f" AND datetime(u2.timestamp) < datetime(?)"
+                params.append(end.isoformat())
+            sub += ")"
+            conditions.append(sub)
+    where = ('WHERE ' + ' AND '.join(conditions)) if conditions else ''
     sql = f"""
         SELECT
             s.session_id,
@@ -911,16 +937,44 @@ def reprocess_wrapper_log():
 
     Only processes log entries after the last recorded offset. On reset,
     the offset advances to end-of-file so old data is never re-inserted.
+
+    Handles log rotation: if the stored offset exceeds the current log size
+    (meaning wrapper.log was rotated), processes the unprocessed tail of
+    wrapper.log.1 first, then the fresh wrapper.log from byte 0.
     """
     log_path = data_dir() / 'wrapper.log'
     if not log_path.exists():
         return {'ok': False, 'error': 'wrapper.log not found'}
 
     offset = _get_reprocess_offset()
+    log_size = log_path.stat().st_size
+
+    # Detect log rotation: stored offset is past the current file size.
+    # Process the unprocessed tail of wrapper.log.1 before resetting.
+    if offset > log_size:
+        rotated_path = data_dir() / 'wrapper.log.1'
+        if rotated_path.exists():
+            rotated_size = rotated_path.stat().st_size
+            if offset < rotated_size:
+                # The old offset points into wrapper.log.1 — process the
+                # remaining events from there before handling the new log.
+                _reprocess_from_log(rotated_path, offset)
+        offset = 0
+
+    result = _reprocess_from_log(log_path, offset)
+    # Save offset to current end of file.
+    _set_reprocess_offset(log_path.stat().st_size)
+    return result
+
+
+def _reprocess_from_log(log_path, offset):
+    """Process agent_stopped events from a single log file starting at offset.
+
+    Returns a summary dict. Does NOT update the reprocess offset — the caller
+    is responsible for that.
+    """
     events = _parse_agent_stopped_events(log_path, offset)
     if not events:
-        # No new events — save offset to current end of file.
-        _set_reprocess_offset(log_path.stat().st_size)
         return {'ok': True, 'processed': 0, 'inserted': 0, 'deleted_duplicates': 0,
                 'sessions_affected': [], 'sessions_created': 0}
 
@@ -940,15 +994,15 @@ def reprocess_wrapper_log():
         all_session_ids = set(sid for (sid, _) in events)
         for sid in all_session_ids:
             meta = session_meta.get(sid, {})
-            # Also extract model info from agent_stopped events for this session.
+            # Extract model info from the LAST agent_stopped event for this
+            # session (most recent model, in case it was switched mid-session).
             model_label = None
             for (eid_sid, eid_rid), (params, log_ts) in events.items():
                 if eid_sid == sid:
                     stats = params.get('stats') or {}
                     ml = stats.get('modelLabel')
                     if ml:
-                        model_label = ml
-                        break
+                        model_label = ml  # keep iterating, last one wins
 
             model = meta.get('model')
             model_display_name = meta.get('model_display_name')
@@ -980,14 +1034,14 @@ def reprocess_wrapper_log():
             if existing:
                 conn.execute(
                     """UPDATE sessions SET
-                       model = COALESCE(model, ?),
-                       model_display_name = COALESCE(model_display_name, ?),
-                       reasoning_effort = COALESCE(reasoning_effort, ?),
-                       cwd = COALESCE(cwd, ?),
-                       first_prompt = COALESCE(first_prompt, ?),
-                       description = COALESCE(description, ?),
-                       created_at = COALESCE(created_at, ?),
-                       updated_at = COALESCE(updated_at, ?),
+                       model = COALESCE(?, model),
+                       model_display_name = COALESCE(?, model_display_name),
+                       reasoning_effort = COALESCE(?, reasoning_effort),
+                       cwd = COALESCE(?, cwd),
+                       first_prompt = COALESCE(?, first_prompt),
+                       description = COALESCE(?, description),
+                       created_at = COALESCE(?, created_at),
+                       updated_at = COALESCE(?, updated_at),
                        source = 'local'
                        WHERE session_id = ?""",
                     (model, model_display_name, reasoning_effort, cwd,
@@ -1052,6 +1106,10 @@ def reprocess_wrapper_log():
             reasoning_effort = row[2] if row else None
 
             # Try model from responseDimensions / modelLabel.
+            # The modelLabel in agent_stopped is the ground truth for this
+            # specific request — it reflects the model that was actually
+            # running at that moment, even if the session was switched
+            # mid-session. Always use it when available.
             dim_model = None
             dim = dims.get('model')
             if isinstance(dim, dict):
@@ -1065,8 +1123,7 @@ def reprocess_wrapper_log():
                     if label_dashed.endswith('-' + suffix):
                         reasoning_effort = suffix
                         break
-                if not model:
-                    model = label_dashed
+                model = label_dashed
 
             # Delete existing rows for this (session_id, request_id) and insert corrected.
             conn.execute(
@@ -1099,7 +1156,7 @@ def reprocess_wrapper_log():
                     duration_ms, stop_reason, error_message,
                     model_display_name, reasoning_effort, source, prompt_text)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (datetime.now(timezone.utc).isoformat(), session_id, request_id, model,
+                (log_ts or datetime.now(timezone.utc).isoformat(), session_id, request_id, model,
                  input_gross, output, total,
                  cached, 0,
                  duration_ms, stop_reason, None,
@@ -1110,9 +1167,6 @@ def reprocess_wrapper_log():
             processed += 1
 
         conn.commit()
-
-    # Save offset to current end of file so we don't reprocess these events again.
-    _set_reprocess_offset(log_path.stat().st_size)
 
     return {
         'ok': True,
@@ -1332,7 +1386,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(api_recent(limit, model_filter))
             if path == '/api/sessions':
                 cwd_filter = qs.get('cwd', ['all'])[0]
-                return self._json(api_sessions(cwd_filter))
+                return self._json(api_sessions(cwd_filter, period))
             if path == '/api/cwd_list':
                 return self._json(api_cwd_list())
             if path.startswith('/api/sessions/'):
@@ -1392,8 +1446,9 @@ def main():
     except Exception:
         pass  # non-fatal: log may not exist yet
     port = int(os.environ.get('DEVIN_TRACK_PORT', '7841'))
-    server = HTTPServer(('127.0.0.1', port), Handler)
-    print(f'DevinTrack dashboard on http://127.0.0.1:{port}')
+    host = os.environ.get('DEVIN_TRACK_HOST', '127.0.0.1')
+    server = HTTPServer((host, port), Handler)
+    print(f'DevinTrack dashboard on http://{host}:{port}')
     try:
         server.serve_forever()
     except KeyboardInterrupt:

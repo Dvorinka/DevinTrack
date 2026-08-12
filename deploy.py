@@ -24,6 +24,31 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).parent.resolve()
 WRAPPER_SRC = SCRIPT_DIR / 'devin'
 
+# The wrapper is a Python script with this shebang. The real Devin binary is an
+# ELF/Mach-O executable. This distinguishes "wrapper installed" from "update
+# overwrote the wrapper with a fresh real binary".
+_WRAPPER_SHEBANG = b'#!/usr/bin/env python3'
+
+
+def _is_wrapper(path: Path) -> bool:
+    """True if the file at path is the DevinTrack Python wrapper."""
+    try:
+        with open(path, 'rb') as f:
+            return f.read(len(_WRAPPER_SHEBANG)) == _WRAPPER_SHEBANG
+    except OSError:
+        return False
+
+
+def _files_equal(a: Path, b: Path) -> bool:
+    """True if two files are byte-identical (size + content)."""
+    try:
+        if a.stat().st_size != b.stat().st_size:
+            return False
+        import filecmp
+        return filecmp.cmp(str(a), str(b), shallow=False)
+    except OSError:
+        return False
+
 
 def find_devin_bin_dir() -> Path:
     """Find the directory containing the Devin binary."""
@@ -91,15 +116,53 @@ def _deploy_unix(bin_dir: Path):
         print(f'ERROR: {devin_path} not found', file=sys.stderr)
         sys.exit(1)
 
-    if backup_path.exists():
-        print(f'Backup already exists at {backup_path}, updating wrapper only.')
+    if _is_wrapper(devin_path):
+        # Wrapper already installed. Keep the existing devin.real backup; just
+        # refresh the wrapper source in case DevinTrack itself was updated.
+        if not backup_path.exists():
+            print(f'WARNING: wrapper present but {backup_path} missing. '
+                  f'The wrapper will fall back to PATH/ENV to find the real binary.',
+                  file=sys.stderr)
+        # Skip the copy if the installed wrapper is already byte-identical to
+        # the source. This prevents re-triggering file watchers (e.g. the
+        # systemd path unit) in an infinite loop when heal runs repeatedly.
+        if _files_equal(WRAPPER_SRC, devin_path):
+            print(f'Wrapper already current; no changes needed.')
+            return
+        print(f'Wrapper already installed; refreshing wrapper source only.')
     else:
-        print(f'Backing up original: {devin_path} -> {backup_path}')
-        shutil.copy2(devin_path, backup_path)
+        # devin is a real binary (either fresh install, or a Devin update
+        # overwrote the wrapper). Back it up so the wrapper can exec it.
+        # Skip the copy if the backup is already byte-identical (avoids
+        # unnecessary writes and path-unit re-trigger on devin.real).
+        if backup_path.exists() and _files_equal(devin_path, backup_path):
+            print(f'Backup already current at {backup_path}.')
+        else:
+            print(f'Backing up real binary: {devin_path} -> {backup_path}')
+            shutil.copy2(devin_path, backup_path)
 
     print(f'Installing wrapper: {WRAPPER_SRC} -> {devin_path}')
-    shutil.copy2(WRAPPER_SRC, devin_path)
-    os.chmod(devin_path, 0o755)
+    # Atomic replace via temp file + rename. A direct copy2 fails with
+    # "Text file busy" (ETXTBSY) if the binary is currently executing (e.g.
+    # a live 'devin acp' process). os.rename over the target works: the
+    # running process keeps the old (now-unlinked) inode; new invocations
+    # get the new file. Temp file must be in the same directory for rename
+    # to be atomic (same filesystem).
+    import tempfile
+    fd, tmp_name = tempfile.mkstemp(
+        prefix='.devin-track-', suffix='.tmp', dir=str(bin_dir)
+    )
+    os.close(fd)
+    try:
+        shutil.copy2(WRAPPER_SRC, tmp_name)
+        os.chmod(tmp_name, 0o755)
+        os.rename(tmp_name, devin_path)
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
 
 
 def _deploy_windows(bin_dir: Path):
@@ -159,6 +222,18 @@ def undeploy():
     else:
         backup = bin_dir / 'devin.real'
         devin_path = bin_dir / 'devin'
+
+        if not _is_wrapper(devin_path):
+            # The wrapper is not installed (Devin update already replaced it
+            # with a real binary). Restoring the stale backup would downgrade
+            # Devin. Nothing to undeploy.
+            if backup.exists():
+                print(f'Wrapper not installed (devin is a real binary). '
+                      f'A stale backup exists at {backup}; leaving it in place '
+                      f'to avoid downgrading the current Devin.')
+            else:
+                print(f'Wrapper not installed; nothing to undeploy.')
+            return
 
         if not backup.exists():
             print(f'ERROR: No backup found at {backup}', file=sys.stderr)

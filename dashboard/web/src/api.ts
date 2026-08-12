@@ -33,8 +33,8 @@ export function getRecent(limit = 20, model: string = 'all'): Promise<UsageRow[]
   return fetchJSON(`${BASE}/recent?limit=${limit}&model=${model}`)
 }
 
-export function getSessions(cwdFilter: string = 'all'): Promise<SessionSummary[]> {
-  return fetchJSON(`${BASE}/sessions?cwd=${encodeURIComponent(cwdFilter)}`)
+export function getSessions(cwdFilter: string = 'all', period: Period = 'all'): Promise<SessionSummary[]> {
+  return fetchJSON(`${BASE}/sessions?cwd=${encodeURIComponent(cwdFilter)}&period=${period}`)
 }
 
 export function getSessionDetail(id: string): Promise<SessionDetail> {

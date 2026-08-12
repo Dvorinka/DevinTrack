@@ -56,7 +56,7 @@ export default function App() {
         getTimeseries(period, modelFilter),
         getModels(period),
         getRecent(30, modelFilter),
-        getSessions(cwdFilter),
+        getSessions(cwdFilter, period),
         getPerformance(period),
         getCwdList(),
       ])

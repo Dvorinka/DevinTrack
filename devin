@@ -20,6 +20,7 @@ import sys
 import threading
 import time
 from datetime import datetime, timezone
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 
@@ -32,11 +33,16 @@ def data_dir() -> Path:
 
 def init_logging():
     log_path = data_dir() / 'wrapper.log'
-    logging.basicConfig(
-        filename=str(log_path),
-        level=logging.INFO,
-        format='%(asctime)s %(levelname)s %(message)s',
+    # Rotating handler caps disk usage. The server's reprocessor resets its
+    # byte offset when the file shrinks below the stored value, so rotation
+    # is safe: after rotation it re-reads the fresh log from byte 0.
+    handler = RotatingFileHandler(
+        str(log_path), maxBytes=10_000_000, backupCount=3, encoding='utf-8',
     )
+    handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s'))
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    root.addHandler(handler)
 
 
 def db_path() -> Path:
@@ -294,10 +300,20 @@ class Tracker:
         params = obj.get('params') or {}
         msg_id = obj.get('id')
 
-        # DEBUG: log all request methods to discover model-switching methods
-        # session/prompt is logged too so the reprocessor can reconstruct prompts.
+        # Log only the methods the server's reprocessor depends on at INFO:
+        # session/new, session/load, session/resume (session metadata + cwd),
+        # session/prompt (prompt text reconstruction).
+        # Config/model-change methods are logged so model switches are recoverable.
+        # Everything else is DEBUG to avoid unbounded log growth (document/didOpen,
+        # listSteps, session/list, etc. are high-volume and not needed for replay).
+        _REPLAY_METHODS = ('session/new', 'session/load', 'session/resume', 'session/prompt')
         if method:
-            logging.info('request method=%s params=%s', method, json.dumps(params, ensure_ascii=False)[:2000])
+            is_replay = method in _REPLAY_METHODS
+            is_config = 'mode' in method.lower() or 'model' in method.lower() or 'config' in method.lower()
+            if is_replay or is_config:
+                logging.info('request method=%s params=%s', method, json.dumps(params, ensure_ascii=False)[:2000])
+            else:
+                logging.debug('request method=%s params=%s', method, json.dumps(params, ensure_ascii=False)[:2000])
 
         if method in ('session/new', 'session/resume', 'session/load'):
             session_id = params.get('sessionId')
@@ -373,10 +389,16 @@ class Tracker:
         if isinstance(result, dict) and ('sessionId' in result or 'configOptions' in result or 'model' in result):
             logging.info('session response: %s', json.dumps(result, ensure_ascii=False)[:3000])
 
-        # Also log any notification-like responses (method field on response side)
+        # Log notification-like responses (method field on response side).
+        # Only agent_stopped is needed by the reprocessor (it scans for the
+        # method string + full params JSON). Other notifications (didOpen,
+        # didClose, listSteps, etc.) are high-volume -> DEBUG.
         method = obj.get('method')
         if method:
-            logging.info('response method=%s: %s', method, json.dumps(obj, ensure_ascii=False)[:2000])
+            if method == '_cognition.ai/agent_stopped':
+                logging.info('response method=%s: %s', method, json.dumps(obj, ensure_ascii=False)[:2000])
+            else:
+                logging.debug('response method=%s: %s', method, json.dumps(obj, ensure_ascii=False)[:2000])
 
         if method == '_cognition.ai/agent_stopped':
             self.handle_agent_stopped(obj)
@@ -585,8 +607,9 @@ class Tracker:
             # Derive reasoning effort from a dashed form of the model label.
             label_dashed = model_label.lower().replace(' ', '-')
             reasoning_effort = extract_reasoning_effort(label_dashed) or reasoning_effort
-            if not model:
-                model = label_dashed
+            # modelLabel is the ground truth for this specific request — use
+            # it even if the sessions table has a different (stale) model.
+            model = label_dashed
 
         # Deduplicate on (session_id, request_id) in case agent_stopped is seen twice.
         try:
