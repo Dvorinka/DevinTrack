@@ -23,11 +23,34 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
 WRAPPER_SRC = SCRIPT_DIR / 'devin'
+BACKFILL_SRC = SCRIPT_DIR / 'backfill_cli.py'
 
 # The wrapper is a Python script with this shebang. The real Devin binary is an
 # ELF/Mach-O executable. This distinguishes "wrapper installed" from "update
 # overwrote the wrapper with a fresh real binary".
 _WRAPPER_SHEBANG = b'#!/usr/bin/env python3'
+
+
+def _real_home() -> Path:
+    """Best-effort real user home, even when invoked as root via sudo/systemd.
+
+    sudo resets HOME to /root and systemd services run as root, so Path.home()
+    would point at the wrong place. Prefer SUDO_USER's passwd entry, then a
+    non-/root HOME (set by the heal service), then fall back to Path.home().
+    """
+    if os.geteuid() != 0:
+        return Path.home()
+    sudo_user = os.environ.get('SUDO_USER')
+    if sudo_user:
+        import pwd
+        try:
+            return Path(pwd.getpwnam(sudo_user).pw_dir)
+        except KeyError:
+            pass
+    env_home = os.environ.get('HOME')
+    if env_home and env_home != '/root':
+        return Path(env_home)
+    return Path.home()
 
 
 def _is_wrapper(path: Path) -> bool:
@@ -51,7 +74,7 @@ def _files_equal(a: Path, b: Path) -> bool:
 
 
 def find_devin_bin_dir() -> Path:
-    """Find the directory containing the Devin binary."""
+    """Find the directory containing the Devin Desktop binary (legacy single-target)."""
     override = os.environ.get('DEVIN_BIN_DIR')
     if override:
         p = Path(override)
@@ -68,13 +91,13 @@ def find_devin_bin_dir() -> Path:
     elif system == 'Darwin':
         candidates = [
             Path('/Applications/Devin Desktop.app/Contents/Resources/app/extensions/windsurf/devin/bin'),
-            Path.home() / '.local' / 'bin',
+            _real_home() / '.local' / 'bin',
         ]
         bin_name = 'devin'
     else:  # Linux
         candidates = [
             Path('/usr/share/devin-desktop/resources/app/extensions/windsurf/devin/bin'),
-            Path.home() / '.local' / 'bin',
+            _real_home() / '.local' / 'bin',
             Path('/usr/local/bin'),
         ]
         bin_name = 'devin'
@@ -90,21 +113,73 @@ def find_devin_bin_dir() -> Path:
     sys.exit(1)
 
 
+def find_cli_bin_dir() -> Path | None:
+    """Resolve the Devin CLI's active binary directory, or None if not installed.
+
+    The CLI lays out versions under ~/.local/share/devin/cli/_versions/<ver>/bin/devin
+    with a 'current' symlink pointing at the active version. We resolve the symlink
+    chain to the real on-disk directory so the wrapper and its devin.real backup
+    land next to the actual binary. This survives 'current' repoints on update:
+    a new version dir gets wrapped by the next heal run.
+    """
+    base = _real_home() / '.local' / 'share' / 'devin' / 'cli' / '_versions' / 'current'
+    devin = base / 'bin' / 'devin'
+    if devin.is_file():
+        real = devin.resolve()
+        if real.name == 'devin':
+            return real.parent
+    return None
+
+
+def find_devin_bin_dirs() -> list:
+    """Return every Devin binary dir to wrap: Desktop (if present) + CLI (if present).
+
+    Deduped by resolved path. On a Desktop-less host this still returns the CLI
+    dir so CLI-only setups are tracked. DEVIN_TRACK_TARGETS (comma-separated
+    'desktop','cli') restricts the set, so the user can wrap just the CLI
+    without root, then run a full sudo pass for the Desktop separately.
+    """
+    wanted = {t.strip().lower() for t in os.environ.get('DEVIN_TRACK_TARGETS', '').split(',') if t.strip()} or {'desktop', 'cli'}
+    dirs = []
+    if 'desktop' in wanted:
+        try:
+            desktop = find_devin_bin_dir()
+            if desktop:
+                dirs.append(desktop)
+        except SystemExit:
+            pass
+    if 'cli' in wanted:
+        cli = find_cli_bin_dir()
+        if cli and cli not in dirs:
+            dirs.append(cli)
+    return dirs
+
+
 def deploy():
     if not WRAPPER_SRC.is_file():
         print(f'ERROR: wrapper not found at {WRAPPER_SRC}', file=sys.stderr)
         sys.exit(1)
 
-    bin_dir = find_devin_bin_dir()
     system = platform.system()
 
     if system == 'Windows':
+        bin_dir = find_devin_bin_dir()
         _deploy_windows(bin_dir)
-    else:
-        _deploy_unix(bin_dir)
+        print(f'\nWrapper installed in: {bin_dir}')
+        print('Restart Devin Desktop to start using the tracker.')
+        print(f'\nDashboard: python3 {SCRIPT_DIR / "dashboard" / "server.py"}')
+        return
 
-    print(f'\nWrapper installed in: {bin_dir}')
-    print('Restart Devin Desktop to start using the tracker.')
+    # Unix: wrap every discovered Devin binary (Desktop + CLI).
+    targets = find_devin_bin_dirs()
+    if not targets:
+        print('ERROR: no Devin binary found to wrap.', file=sys.stderr)
+        sys.exit(1)
+    for bin_dir in targets:
+        print(f'\n--- target: {bin_dir} ---')
+        _deploy_unix(bin_dir)
+    print(f'\nWrapper installed in: {[str(t) for t in targets]}')
+    print('Restart Devin Desktop / CLI sessions to start using the tracker.')
     print(f'\nDashboard: python3 {SCRIPT_DIR / "dashboard" / "server.py"}')
 
 
@@ -164,6 +239,31 @@ def _deploy_unix(bin_dir: Path):
             pass
         raise
 
+    # If running as root, match the wrapper + backup ownership to the target
+    # directory's owner. Keeps CLI version-dir files user-owned (so the CLI's
+    # own version cleanup can remove them) while Desktop files stay root-owned.
+    if os.geteuid() == 0:
+        st = os.stat(bin_dir)
+        try:
+            os.chown(devin_path, st.st_uid, st.st_gid)
+            if backup_path.exists():
+                os.chown(backup_path, st.st_uid, st.st_gid)
+        except OSError:
+            pass
+
+    # Install / refresh the backfill helper so the wrapper can import from the
+    # same directory after deployment.
+    if BACKFILL_SRC.is_file():
+        backfill_dest = bin_dir / 'backfill_cli.py'
+        if not backfill_dest.exists() or not _files_equal(BACKFILL_SRC, backfill_dest):
+            print(f'Installing backfill helper: {BACKFILL_SRC} -> {backfill_dest}')
+            shutil.copy2(BACKFILL_SRC, backfill_dest)
+            if os.geteuid() == 0:
+                try:
+                    os.chown(backfill_dest, st.st_uid, st.st_gid)
+                except OSError:
+                    pass
+
 
 def _deploy_windows(bin_dir: Path):
     devin_exe = bin_dir / 'devin.exe'
@@ -200,11 +300,36 @@ python "%~dp0devin_wrapper.py" %*
     print(f'in your environment so the wrapper finds the original binary.')
 
 
+def _undeploy_unix(bin_dir: Path):
+    backup = bin_dir / 'devin.real'
+    devin_path = bin_dir / 'devin'
+
+    if not _is_wrapper(devin_path):
+        # The wrapper is not installed (Devin update already replaced it
+        # with a real binary). Restoring the stale backup would downgrade
+        # Devin. Nothing to undeploy.
+        if backup.exists():
+            print(f'Wrapper not installed at {devin_path} (real binary). '
+                  f'A stale backup exists at {backup}; leaving it in place '
+                  f'to avoid downgrading the current Devin.')
+        else:
+            print(f'Wrapper not installed at {devin_path}; nothing to undeploy.')
+        return
+
+    if not backup.exists():
+        print(f'ERROR: No backup found at {backup}', file=sys.stderr)
+        return
+
+    print(f'Restoring: {backup} -> {devin_path}')
+    shutil.move(str(backup), str(devin_path))
+    os.chmod(devin_path, 0o755)
+
+
 def undeploy():
-    bin_dir = find_devin_bin_dir()
     system = platform.system()
 
     if system == 'Windows':
+        bin_dir = find_devin_bin_dir()
         backup = bin_dir / 'devin.exe.bak'
         devin_exe = bin_dir / 'devin.exe'
         wrapper_py = bin_dir / 'devin_wrapper.py'
@@ -219,31 +344,18 @@ def undeploy():
         for f in (wrapper_py, cmd_shim):
             if f.exists():
                 f.unlink()
-    else:
-        backup = bin_dir / 'devin.real'
-        devin_path = bin_dir / 'devin'
+        print('Original Devin binary restored.')
+        return
 
-        if not _is_wrapper(devin_path):
-            # The wrapper is not installed (Devin update already replaced it
-            # with a real binary). Restoring the stale backup would downgrade
-            # Devin. Nothing to undeploy.
-            if backup.exists():
-                print(f'Wrapper not installed (devin is a real binary). '
-                      f'A stale backup exists at {backup}; leaving it in place '
-                      f'to avoid downgrading the current Devin.')
-            else:
-                print(f'Wrapper not installed; nothing to undeploy.')
-            return
-
-        if not backup.exists():
-            print(f'ERROR: No backup found at {backup}', file=sys.stderr)
-            sys.exit(1)
-
-        print(f'Restoring: {backup} -> {devin_path}')
-        shutil.move(str(backup), str(devin_path))
-        os.chmod(devin_path, 0o755)
-
-    print('Original Devin binary restored.')
+    # Unix: restore every wrapped target (Desktop + CLI).
+    targets = find_devin_bin_dirs()
+    if not targets:
+        print('ERROR: no Devin binary found to undeploy.', file=sys.stderr)
+        sys.exit(1)
+    for bin_dir in targets:
+        print(f'\n--- target: {bin_dir} ---')
+        _undeploy_unix(bin_dir)
+    print('\nOriginal Devin binary(ies) restored.')
 
 
 def main():

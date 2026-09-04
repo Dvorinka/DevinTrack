@@ -19,7 +19,7 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -104,7 +104,11 @@ def find_real_devin() -> str:
     if os.environ.get('DEVIN_TRACK_REAL'):
         return os.environ['DEVIN_TRACK_REAL']
 
-    my_path = os.path.abspath(sys.argv[0])
+    # Resolve symlinks: when the wrapper is reached via a symlink chain
+    # (e.g. the CLI's ~/.local/bin/devin -> _versions/current/bin/devin ->
+    # wrapper), sys.argv[0] is the outer link. realpath lands on the real
+    # wrapper file so the devin.real backup sitting next to it is found.
+    my_path = os.path.realpath(sys.argv[0])
     my_dir = os.path.dirname(my_path)
 
     # Check for backup alongside the wrapper.
@@ -145,6 +149,93 @@ def find_real_devin() -> str:
             return candidate
 
     raise FileNotFoundError('real devin binary not found')
+
+
+# Subcommands that never create an agent session. For these, exec the real
+# binary directly; for everything else, run the real binary and backfill.
+# jarvis: heuristic list; update if Devin adds non-session subcommands.
+_NON_SESSION = frozenset({
+    'auth', 'mcp', 'models', 'doctor', 'rules', 'skills', 'plugins', 'cloud',
+    'desktop', 'list', 'ls', 'rm', 'ssh', 'update', 'version', 'migrate',
+    'sandbox', 'setup', 'uninstall', 'help',
+})
+
+
+def is_cli_session(argv):
+    """True if the given argv starts an agent session.
+
+    `devin`, `devin acp`, `devin --print`, and `devin <path> [prompt]` are
+    sessions. `devin auth`, `devin list`, `devin --help`, etc. are not.
+    """
+    if not argv:
+        return True
+    if any(a in argv for a in ('--help', '-h', '--version', '-v')):
+        return False
+    if argv[0] in _NON_SESSION:
+        return False
+    # Anything else (including options like --print or a path/prompt) is a
+    # session that the CLI's own database will record.
+    return True
+
+
+def _backfill_cli_path() -> Path | None:
+    """Locate backfill_cli.py next to the wrapper, via env, or in source repo."""
+    if os.environ.get('DEVIN_TRACK_BACKFILL'):
+        p = Path(os.environ['DEVIN_TRACK_BACKFILL'])
+        if p.is_file():
+            return p
+
+    p = Path(__file__).with_name('backfill_cli.py')
+    if p.is_file():
+        return p
+
+    # Source-repo fallback for development / manual runs.
+    # jarvis: hardcoded; deploy.py installs backfill_cli.py next to the
+    # wrapper, so this only fires during development from the repo itself.
+    p = Path('/home/tdvorak/Desktop/PROG+HTML/DevinTrack/backfill_cli.py')
+    if p.is_file():
+        return p
+
+    return None
+
+
+def run_backfill():
+    """Spawn backfill_cli.py in the background to import CLI sessions."""
+    # jarvis: scans the last 3 days of message_nodes; targeted per-session
+    # backfill would be lighter, but this is safe, idempotent, and reuses the
+    # existing backfill script.
+    path = _backfill_cli_path()
+    if not path:
+        logging.warning('backfill_cli.py not found; skipping CLI backfill')
+        return
+
+    today = datetime.now().astimezone()
+    from_date = (today - timedelta(days=2)).strftime('%Y-%m-%d')
+    to_date = today.strftime('%Y-%m-%d')
+
+    try:
+        subprocess.Popen(
+            [sys.executable, str(path), '--from', from_date, '--to', to_date],
+            start_new_session=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        logging.info('spawned CLI backfill (%s -> %s)', from_date, to_date)
+    except Exception as e:
+        logging.exception('failed to spawn CLI backfill: %s', e)
+
+
+def run_session(real_devin: str, argv: list):
+    """Run an interactive `devin` session and backfill after it exits."""
+    proc = subprocess.Popen([real_devin] + argv)
+    try:
+        return proc.wait()
+    except KeyboardInterrupt:
+        _terminate_child(proc)
+        return 130
+    finally:
+        run_backfill()
 
 
 def iso_now() -> str:
@@ -773,6 +864,7 @@ def run_acp(real_devin: str, argv: list):
         pass
     finally:
         _terminate_child(proc)
+        run_backfill()
 
     return proc.returncode
 
@@ -891,6 +983,7 @@ def run_print_mode(real_devin: str, argv: list):
                 os.unlink(export_path)
             except Exception:
                 pass
+        run_backfill()
 
     return proc.returncode
 
@@ -899,31 +992,36 @@ def main():
     init_logging()
     argv = sys.argv[1:]
 
-    # Intercept 'acp' subcommand and '--print' mode (which uses ACP internally).
+    real_devin = find_real_devin()
     is_acp = argv and argv[0] == 'acp'
     is_print = '--print' in argv or '--prompt-file' in argv
+    session = is_cli_session(argv)
 
-    if not is_acp and not is_print:
-        # Not the ACP server or print mode; exec the real binary directly.
-        real_devin = find_real_devin()
+    if not session:
+        # Non-session subcommand: exec the real binary directly for speed.
         os.execvp(real_devin, [real_devin] + argv)
 
-    real_devin = find_real_devin()
     logging.info('starting wrapper; real devin=%s', real_devin)
 
     if is_print and not is_acp:
-        # --print mode: use export file approach.
         try:
             return run_print_mode(real_devin, argv)
         except Exception as e:
             logging.exception('wrapper error (print mode)')
             raise
 
-    # ACP mode: proxy stdio.
+    if is_acp:
+        try:
+            return run_acp(real_devin, argv)
+        except Exception as e:
+            logging.exception('wrapper error')
+            raise
+
+    # Interactive / prompt-based session (e.g. `devin` or `devin path prompt`).
     try:
-        return run_acp(real_devin, argv)
+        return run_session(real_devin, argv)
     except Exception as e:
-        logging.exception('wrapper error')
+        logging.exception('wrapper error (session)')
         raise
 
 
