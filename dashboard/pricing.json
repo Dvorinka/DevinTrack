@@ -13,13 +13,6 @@
     "cr": 0.5,
     "cw": 0
   },
-  "MODEL_CHAT_GPT_5_CODEX": {
-    "label": "GPT-5-Codex",
-    "in": 1.25,
-    "out": 10,
-    "cr": 0.125,
-    "cw": 0
-  },
   "MODEL_CHAT_O3": {
     "label": "o3",
     "in": 2,
@@ -33,20 +26,6 @@
     "out": 8,
     "cr": 0.5,
     "cw": 0
-  },
-  "MODEL_CLAUDE_4_1_OPUS": {
-    "label": "Claude Opus 4.1",
-    "in": 15,
-    "out": 75,
-    "cr": 1.5,
-    "cw": 18.75
-  },
-  "MODEL_CLAUDE_4_1_OPUS_THINKING": {
-    "label": "Claude Opus 4.1 Thinking",
-    "in": 15,
-    "out": 75,
-    "cr": 1.5,
-    "cw": 18.75
   },
   "MODEL_CLAUDE_4_5_OPUS": {
     "label": "Claude Opus 4.5",
@@ -110,97 +89,6 @@
     "out": 3,
     "cr": 0.05,
     "cw": 1
-  },
-  "MODEL_GPT_5_1_CODEX_LOW": {
-    "label": "GPT-5.1-Codex Low",
-    "in": 1.25,
-    "out": 10,
-    "cr": 0.125,
-    "cw": 0
-  },
-  "MODEL_GPT_5_1_CODEX_MAX_HIGH": {
-    "label": "GPT-5.1-Codex Max High",
-    "in": 1.25,
-    "out": 10,
-    "cr": 0.125,
-    "cw": 0
-  },
-  "MODEL_GPT_5_1_CODEX_MAX_LOW": {
-    "label": "GPT-5.1-Codex Max Low",
-    "in": 1.25,
-    "out": 10,
-    "cr": 0.125,
-    "cw": 0
-  },
-  "MODEL_GPT_5_1_CODEX_MAX_MEDIUM": {
-    "label": "GPT-5.1-Codex Max Medium",
-    "in": 1.25,
-    "out": 10,
-    "cr": 0.125,
-    "cw": 0
-  },
-  "MODEL_GPT_5_1_CODEX_MINI_LOW": {
-    "label": "GPT-5.1-Codex-Mini Low",
-    "in": 0.25,
-    "out": 2,
-    "cr": 0.025,
-    "cw": 0
-  },
-  "MODEL_GPT_5_2_CODEX_HIGH": {
-    "label": "GPT-5.2-Codex High",
-    "in": 1.75,
-    "out": 14,
-    "cr": 0.175,
-    "cw": 0
-  },
-  "MODEL_GPT_5_2_CODEX_HIGH_PRIORITY": {
-    "label": "GPT-5.2-Codex High Fast",
-    "in": 3.5,
-    "out": 28,
-    "cr": 0.35,
-    "cw": 0
-  },
-  "MODEL_GPT_5_2_CODEX_LOW": {
-    "label": "GPT-5.2-Codex Low",
-    "in": 1.75,
-    "out": 14,
-    "cr": 0.175,
-    "cw": 0
-  },
-  "MODEL_GPT_5_2_CODEX_LOW_PRIORITY": {
-    "label": "GPT-5.2-Codex Low Fast",
-    "in": 3.5,
-    "out": 28,
-    "cr": 0.35,
-    "cw": 0
-  },
-  "MODEL_GPT_5_2_CODEX_MEDIUM": {
-    "label": "GPT-5.2-Codex Medium",
-    "in": 1.75,
-    "out": 14,
-    "cr": 0.175,
-    "cw": 0
-  },
-  "MODEL_GPT_5_2_CODEX_MEDIUM_PRIORITY": {
-    "label": "GPT-5.2-Codex Medium Fast",
-    "in": 3.5,
-    "out": 28,
-    "cr": 0.35,
-    "cw": 0
-  },
-  "MODEL_GPT_5_2_CODEX_XHIGH": {
-    "label": "GPT-5.2-Codex XHigh",
-    "in": 1.75,
-    "out": 14,
-    "cr": 0.175,
-    "cw": 0
-  },
-  "MODEL_GPT_5_2_CODEX_XHIGH_PRIORITY": {
-    "label": "GPT-5.2-Codex XHigh Fast",
-    "in": 3.5,
-    "out": 28,
-    "cr": 0.35,
-    "cw": 0
   },
   "MODEL_GPT_5_2_HIGH": {
     "label": "GPT-5.2 High Thinking",
@@ -314,13 +202,6 @@
     "cr": 0.125,
     "cw": 0
   },
-  "MODEL_PRIVATE_19": {
-    "label": "GPT-5.1-Codex-Mini",
-    "in": 1.25,
-    "out": 10,
-    "cr": 0.125,
-    "cw": 0
-  },
   "MODEL_PRIVATE_2": {
     "label": "Claude Sonnet 4.5",
     "in": 3,
@@ -370,13 +251,6 @@
     "cr": 0.02,
     "cw": 0
   },
-  "MODEL_PRIVATE_5": {
-    "label": "GPT-5-Codex",
-    "in": 1.25,
-    "out": 10,
-    "cr": 0.125,
-    "cw": 0
-  },
   "MODEL_PRIVATE_6": {
     "label": "GPT-5 Low Thinking",
     "in": 1.25,
@@ -396,27 +270,6 @@
     "in": 1.25,
     "out": 10,
     "cr": 0.125,
-    "cw": 0
-  },
-  "MODEL_PRIVATE_9": {
-    "label": "GPT-5.1-Codex Medium",
-    "in": 0.25,
-    "out": 2,
-    "cr": 0.025,
-    "cw": 0
-  },
-  "MODEL_SWE_1_5": {
-    "label": "SWE-1.5 Fast",
-    "in": 0.3,
-    "out": 1.5,
-    "cr": 0.03,
-    "cw": 0.375
-  },
-  "MODEL_SWE_1_5_SLOW": {
-    "label": "SWE-1.5",
-    "in": 0,
-    "out": 0,
-    "cr": 0,
     "cw": 0
   },
   "adaptive": {
@@ -447,6 +300,41 @@
     "cr": 0.3,
     "cw": 3.75
   },
+  "claude-5-fable-high": {
+    "label": "Claude Fable 5 High",
+    "in": 10,
+    "out": 50,
+    "cr": 1,
+    "cw": 12.5
+  },
+  "claude-5-fable-low": {
+    "label": "Claude Fable 5 Low",
+    "in": 10,
+    "out": 50,
+    "cr": 1,
+    "cw": 12.5
+  },
+  "claude-5-fable-max": {
+    "label": "Claude Fable 5 Max",
+    "in": 10,
+    "out": 50,
+    "cr": 1,
+    "cw": 12.5
+  },
+  "claude-5-fable-medium": {
+    "label": "Claude Fable 5 Medium",
+    "in": 10,
+    "out": 50,
+    "cr": 1,
+    "cw": 12.5
+  },
+  "claude-5-fable-xhigh": {
+    "label": "Claude Fable 5 XHigh",
+    "in": 10,
+    "out": 50,
+    "cr": 1,
+    "cw": 12.5
+  },
   "claude-opus-4-6": {
     "label": "Claude Opus 4.6",
     "in": 5,
@@ -460,13 +348,6 @@
     "out": 25,
     "cr": 0.5,
     "cw": 6.25
-  },
-  "claude-opus-4-6-fast": {
-    "label": "Claude Opus 4.6 Fast",
-    "in": 30,
-    "out": 150,
-    "cr": 3,
-    "cw": 37.5
   },
   "claude-opus-4-6-thinking": {
     "label": "Claude Opus 4.6 Thinking",
@@ -482,26 +363,12 @@
     "cr": 0.5,
     "cw": 6.25
   },
-  "claude-opus-4-6-thinking-fast": {
-    "label": "Claude Opus 4.6 Thinking Fast",
-    "in": 30,
-    "out": 150,
-    "cr": 3,
-    "cw": 37.5
-  },
   "claude-opus-4-7-high": {
     "label": "Claude Opus 4.7 High",
     "in": 5,
     "out": 25,
     "cr": 0.5,
     "cw": 6.25
-  },
-  "claude-opus-4-7-high-fast": {
-    "label": "Claude Opus 4.7 High Fast",
-    "in": 30,
-    "out": 150,
-    "cr": 3,
-    "cw": 37.5
   },
   "claude-opus-4-7-low": {
     "label": "Claude Opus 4.7 Low",
@@ -510,26 +377,12 @@
     "cr": 0.5,
     "cw": 6.25
   },
-  "claude-opus-4-7-low-fast": {
-    "label": "Claude Opus 4.7 Low Fast",
-    "in": 30,
-    "out": 150,
-    "cr": 3,
-    "cw": 37.5
-  },
   "claude-opus-4-7-max": {
     "label": "Claude Opus 4.7 Max",
     "in": 5,
     "out": 25,
     "cr": 0.5,
     "cw": 6.25
-  },
-  "claude-opus-4-7-max-fast": {
-    "label": "Claude Opus 4.7 Max Fast",
-    "in": 30,
-    "out": 150,
-    "cr": 3,
-    "cw": 37.5
   },
   "claude-opus-4-7-medium": {
     "label": "Claude Opus 4.7 Medium",
@@ -538,26 +391,12 @@
     "cr": 0.5,
     "cw": 6.25
   },
-  "claude-opus-4-7-medium-fast": {
-    "label": "Claude Opus 4.7 Medium Fast",
-    "in": 30,
-    "out": 150,
-    "cr": 3,
-    "cw": 37.5
-  },
   "claude-opus-4-7-xhigh": {
     "label": "Claude Opus 4.7 XHigh",
     "in": 5,
     "out": 25,
     "cr": 0.5,
     "cw": 6.25
-  },
-  "claude-opus-4-7-xhigh-fast": {
-    "label": "Claude Opus 4.7 XHigh Fast",
-    "in": 30,
-    "out": 150,
-    "cr": 3,
-    "cw": 37.5
   },
   "claude-opus-4-8-high": {
     "label": "Claude Opus 4.8 High",
@@ -624,41 +463,6 @@
   },
   "claude-opus-4-8-xhigh-fast": {
     "label": "Claude Opus 4.8 XHigh Fast",
-    "in": 10,
-    "out": 50,
-    "cr": 1,
-    "cw": 12.5
-  },
-  "claude-fable-5-high": {
-    "label": "Claude Fable 5 High",
-    "in": 10,
-    "out": 50,
-    "cr": 1,
-    "cw": 12.5
-  },
-  "claude-fable-5-low": {
-    "label": "Claude Fable 5 Low",
-    "in": 10,
-    "out": 50,
-    "cr": 1,
-    "cw": 12.5
-  },
-  "claude-fable-5-max": {
-    "label": "Claude Fable 5 Max",
-    "in": 10,
-    "out": 50,
-    "cr": 1,
-    "cw": 12.5
-  },
-  "claude-fable-5-medium": {
-    "label": "Claude Fable 5 Medium",
-    "in": 10,
-    "out": 50,
-    "cr": 1,
-    "cw": 12.5
-  },
-  "claude-fable-5-xhigh": {
-    "label": "Claude Fable 5 XHigh",
     "in": 10,
     "out": 50,
     "cr": 1,
@@ -764,41 +568,41 @@
   },
   "claude-sonnet-5-high": {
     "label": "Claude Sonnet 5 High",
-    "in": 3,
-    "out": 15,
-    "cr": 0.3,
-    "cw": 3.75
+    "in": 2,
+    "out": 10,
+    "cr": 0.2,
+    "cw": 2.5
   },
   "claude-sonnet-5-low": {
     "label": "Claude Sonnet 5 Low",
-    "in": 3,
-    "out": 15,
-    "cr": 0.3,
-    "cw": 3.75
+    "in": 2,
+    "out": 10,
+    "cr": 0.2,
+    "cw": 2.5
   },
   "claude-sonnet-5-max": {
     "label": "Claude Sonnet 5 Max",
-    "in": 3,
-    "out": 15,
-    "cr": 0.3,
-    "cw": 3.75
+    "in": 2,
+    "out": 10,
+    "cr": 0.2,
+    "cw": 2.5
   },
   "claude-sonnet-5-medium": {
     "label": "Claude Sonnet 5 Medium",
-    "in": 3,
-    "out": 15,
-    "cr": 0.3,
-    "cw": 3.75
+    "in": 2,
+    "out": 10,
+    "cr": 0.2,
+    "cw": 2.5
   },
   "claude-sonnet-5-xhigh": {
     "label": "Claude Sonnet 5 XHigh",
-    "in": 3,
-    "out": 15,
-    "cr": 0.3,
-    "cw": 3.75
+    "in": 2,
+    "out": 10,
+    "cr": 0.2,
+    "cw": 2.5
   },
-  "deepseek-v4": {
-    "label": "DeepSeek V4 Pro",
+  "deepseek-v4-pro-high": {
+    "label": "DeepSeek V4 Pro High",
     "in": 1.74,
     "out": 3.48,
     "cr": 0.15,
@@ -874,15 +678,43 @@
     "cr": 0.15,
     "cw": 1.5
   },
-  "glm-5-1": {
-    "label": "GLM-5.1",
+  "glm-5-2": {
+    "label": "GLM-5.2 High",
     "in": 1.4,
     "out": 4.4,
     "cr": 0.26,
     "cw": 0
   },
-  "glm-5-2": {
-    "label": "GLM-5.2",
+  "glm-5-2-1m": {
+    "label": "GLM-5.2 High 1M",
+    "in": 1.4,
+    "out": 4.4,
+    "cr": 0.26,
+    "cw": 0
+  },
+  "glm-5-2-max": {
+    "label": "GLM-5.2 Max",
+    "in": 1.4,
+    "out": 4.4,
+    "cr": 0.26,
+    "cw": 0
+  },
+  "glm-5-2-max-1m": {
+    "label": "GLM-5.2 Max 1M",
+    "in": 1.4,
+    "out": 4.4,
+    "cr": 0.26,
+    "cw": 0
+  },
+  "glm-5-2-none": {
+    "label": "GLM-5.2 No Thinking",
+    "in": 1.4,
+    "out": 4.4,
+    "cr": 0.26,
+    "cw": 0
+  },
+  "glm-5-2-none-1m": {
+    "label": "GLM-5.2 No Thinking 1M",
     "in": 1.4,
     "out": 4.4,
     "cr": 0.26,
@@ -1133,12 +965,40 @@
     "cr": 0.02,
     "cw": 0.25
   },
+  "gpt-5-6-luna-high-priority": {
+    "label": "GPT-5.6 Luna High Thinking Fast",
+    "in": 0.4,
+    "out": 2.4,
+    "cr": 0.04,
+    "cw": 0.5
+  },
   "gpt-5-6-luna-low": {
     "label": "GPT-5.6 Luna Low Thinking",
     "in": 0.2,
     "out": 1.2,
     "cr": 0.02,
     "cw": 0.25
+  },
+  "gpt-5-6-luna-low-priority": {
+    "label": "GPT-5.6 Luna Low Thinking Fast",
+    "in": 0.4,
+    "out": 2.4,
+    "cr": 0.04,
+    "cw": 0.5
+  },
+  "gpt-5-6-luna-max": {
+    "label": "GPT-5.6 Luna Max Thinking",
+    "in": 0.2,
+    "out": 1.2,
+    "cr": 0.02,
+    "cw": 0.25
+  },
+  "gpt-5-6-luna-max-priority": {
+    "label": "GPT-5.6 Luna Max Thinking Fast",
+    "in": 0.4,
+    "out": 2.4,
+    "cr": 0.04,
+    "cw": 0.5
   },
   "gpt-5-6-luna-medium": {
     "label": "GPT-5.6 Luna Medium Thinking",
@@ -1147,12 +1007,26 @@
     "cr": 0.02,
     "cw": 0.25
   },
+  "gpt-5-6-luna-medium-priority": {
+    "label": "GPT-5.6 Luna Medium Thinking Fast",
+    "in": 0.4,
+    "out": 2.4,
+    "cr": 0.04,
+    "cw": 0.5
+  },
   "gpt-5-6-luna-none": {
     "label": "GPT-5.6 Luna No Thinking",
     "in": 0.2,
     "out": 1.2,
     "cr": 0.02,
     "cw": 0.25
+  },
+  "gpt-5-6-luna-none-priority": {
+    "label": "GPT-5.6 Luna No Thinking Fast",
+    "in": 0.4,
+    "out": 2.4,
+    "cr": 0.04,
+    "cw": 0.5
   },
   "gpt-5-6-luna-xhigh": {
     "label": "GPT-5.6 Luna XHigh Thinking",
@@ -1161,12 +1035,26 @@
     "cr": 0.02,
     "cw": 0.25
   },
+  "gpt-5-6-luna-xhigh-priority": {
+    "label": "GPT-5.6 Luna XHigh Thinking Fast",
+    "in": 0.4,
+    "out": 2.4,
+    "cr": 0.04,
+    "cw": 0.5
+  },
   "gpt-5-6-sol-high": {
     "label": "GPT-5.6 Sol High Thinking",
     "in": 5,
     "out": 30,
     "cr": 0.5,
     "cw": 6.25
+  },
+  "gpt-5-6-sol-high-priority": {
+    "label": "GPT-5.6 Sol High Thinking Fast",
+    "in": 10,
+    "out": 60,
+    "cr": 1,
+    "cw": 12.5
   },
   "gpt-5-6-sol-low": {
     "label": "GPT-5.6 Sol Low Thinking",
@@ -1175,12 +1063,40 @@
     "cr": 0.5,
     "cw": 6.25
   },
+  "gpt-5-6-sol-low-priority": {
+    "label": "GPT-5.6 Sol Low Thinking Fast",
+    "in": 10,
+    "out": 60,
+    "cr": 1,
+    "cw": 12.5
+  },
+  "gpt-5-6-sol-max": {
+    "label": "GPT-5.6 Sol Max Thinking",
+    "in": 5,
+    "out": 30,
+    "cr": 0.5,
+    "cw": 6.25
+  },
+  "gpt-5-6-sol-max-priority": {
+    "label": "GPT-5.6 Sol Max Thinking Fast",
+    "in": 10,
+    "out": 60,
+    "cr": 1,
+    "cw": 12.5
+  },
   "gpt-5-6-sol-medium": {
     "label": "GPT-5.6 Sol Medium Thinking",
     "in": 5,
     "out": 30,
     "cr": 0.5,
     "cw": 6.25
+  },
+  "gpt-5-6-sol-medium-priority": {
+    "label": "GPT-5.6 Sol Medium Thinking Fast",
+    "in": 10,
+    "out": 60,
+    "cr": 1,
+    "cw": 12.5
   },
   "gpt-5-6-sol-none": {
     "label": "GPT-5.6 Sol No Thinking",
@@ -1189,12 +1105,26 @@
     "cr": 0.5,
     "cw": 6.25
   },
+  "gpt-5-6-sol-none-priority": {
+    "label": "GPT-5.6 Sol No Thinking Fast",
+    "in": 10,
+    "out": 60,
+    "cr": 1,
+    "cw": 12.5
+  },
   "gpt-5-6-sol-xhigh": {
     "label": "GPT-5.6 Sol XHigh Thinking",
     "in": 5,
     "out": 30,
     "cr": 0.5,
     "cw": 6.25
+  },
+  "gpt-5-6-sol-xhigh-priority": {
+    "label": "GPT-5.6 Sol XHigh Thinking Fast",
+    "in": 10,
+    "out": 60,
+    "cr": 1,
+    "cw": 12.5
   },
   "gpt-5-6-terra-high": {
     "label": "GPT-5.6 Terra High Thinking",
@@ -1203,12 +1133,40 @@
     "cr": 0.2,
     "cw": 2.5
   },
+  "gpt-5-6-terra-high-priority": {
+    "label": "GPT-5.6 Terra High Thinking Fast",
+    "in": 4,
+    "out": 24,
+    "cr": 0.4,
+    "cw": 5
+  },
   "gpt-5-6-terra-low": {
     "label": "GPT-5.6 Terra Low Thinking",
     "in": 2,
     "out": 12,
     "cr": 0.2,
     "cw": 2.5
+  },
+  "gpt-5-6-terra-low-priority": {
+    "label": "GPT-5.6 Terra Low Thinking Fast",
+    "in": 4,
+    "out": 24,
+    "cr": 0.4,
+    "cw": 5
+  },
+  "gpt-5-6-terra-max": {
+    "label": "GPT-5.6 Terra Max Thinking",
+    "in": 2,
+    "out": 12,
+    "cr": 0.2,
+    "cw": 2.5
+  },
+  "gpt-5-6-terra-max-priority": {
+    "label": "GPT-5.6 Terra Max Thinking Fast",
+    "in": 4,
+    "out": 24,
+    "cr": 0.4,
+    "cw": 5
   },
   "gpt-5-6-terra-medium": {
     "label": "GPT-5.6 Terra Medium Thinking",
@@ -1217,6 +1175,13 @@
     "cr": 0.2,
     "cw": 2.5
   },
+  "gpt-5-6-terra-medium-priority": {
+    "label": "GPT-5.6 Terra Medium Thinking Fast",
+    "in": 4,
+    "out": 24,
+    "cr": 0.4,
+    "cw": 5
+  },
   "gpt-5-6-terra-none": {
     "label": "GPT-5.6 Terra No Thinking",
     "in": 2,
@@ -1224,12 +1189,26 @@
     "cr": 0.2,
     "cw": 2.5
   },
+  "gpt-5-6-terra-none-priority": {
+    "label": "GPT-5.6 Terra No Thinking Fast",
+    "in": 4,
+    "out": 24,
+    "cr": 0.4,
+    "cw": 5
+  },
   "gpt-5-6-terra-xhigh": {
     "label": "GPT-5.6 Terra XHigh Thinking",
     "in": 2,
     "out": 12,
     "cr": 0.2,
     "cw": 2.5
+  },
+  "gpt-5-6-terra-xhigh-priority": {
+    "label": "GPT-5.6 Terra XHigh Thinking Fast",
+    "in": 4,
+    "out": 24,
+    "cr": 0.4,
+    "cw": 5
   },
   "grok-4-5-high": {
     "label": "Grok 4.5 High",
@@ -1247,6 +1226,34 @@
   },
   "grok-4-5-medium": {
     "label": "Grok 4.5 Medium",
+    "in": 2,
+    "out": 6,
+    "cr": 0.3,
+    "cw": 0
+  },
+  "grok-4-6-high": {
+    "label": "Grok 4.6 High",
+    "in": 2,
+    "out": 6,
+    "cr": 0.3,
+    "cw": 0
+  },
+  "grok-4-6-low": {
+    "label": "Grok 4.6 Low",
+    "in": 2,
+    "out": 6,
+    "cr": 0.3,
+    "cw": 0
+  },
+  "grok-4-6-medium": {
+    "label": "Grok 4.6 Medium",
+    "in": 2,
+    "out": 6,
+    "cr": 0.3,
+    "cw": 0
+  },
+  "grok-4-6-xhigh": {
+    "label": "Grok 4.6 XHigh",
     "in": 2,
     "out": 6,
     "cr": 0.3,
@@ -1294,13 +1301,6 @@
     "cr": 0.26,
     "cw": 0
   },
-  "kimi-k2-5": {
-    "label": "Kimi K2.5",
-    "in": 0.6,
-    "out": 3,
-    "cr": 0.1,
-    "cw": 0
-  },
   "kimi-k2-6": {
     "label": "Kimi K2.6",
     "in": 0.95,
@@ -1336,15 +1336,22 @@
     "cr": 0.3,
     "cw": 0
   },
-  "minimax-m2-5": {
-    "label": "Minimax M2.5",
-    "in": 0.3,
-    "out": 1.2,
-    "cr": 0.03,
-    "cw": 0.375
+  "nemotron-3-ultra-high": {
+    "label": "Nemotron 3 Ultra High",
+    "in": 0.6,
+    "out": 2.4,
+    "cr": 0.12,
+    "cw": 0
   },
-  "nemotron-3-ultra-nvfp4": {
-    "label": "Nemotron 3 Ultra",
+  "nemotron-3-ultra-medium": {
+    "label": "Nemotron 3 Ultra Medium",
+    "in": 0.6,
+    "out": 2.4,
+    "cr": 0.12,
+    "cw": 0
+  },
+  "nemotron-3-ultra-none": {
+    "label": "Nemotron 3 Ultra None",
     "in": 0.6,
     "out": 2.4,
     "cr": 0.12,
@@ -1359,32 +1366,58 @@
   },
   "swe-1-6": {
     "label": "SWE-1.6",
-    "in": 1.5,
-    "out": 7.0,
-    "cr": 0.15,
-    "cw": 0,
-    "estimated": true
+    "in": 0.5,
+    "out": 2.5,
+    "cr": 0.2,
+    "cw": 0
   },
   "swe-1-6-fast": {
     "label": "SWE-1.6 Fast",
-    "in": 0.3,
-    "out": 1.5,
-    "cr": 0.03,
+    "in": 0.5,
+    "out": 2.5,
+    "cr": 0.2,
     "cw": 0
   },
   "swe-1-7": {
-    "label": "SWE-1.7",
-    "in": 1.5,
-    "out": 7.0,
-    "cr": 0.15,
-    "cw": 0,
-    "estimated": true
+    "label": "SWE-1.7 Max",
+    "in": 0.5,
+    "out": 2.5,
+    "cr": 0.2,
+    "cw": 0
   },
   "swe-1-7-lightning": {
-    "label": "SWE-1.7 Lightning",
+    "label": "SWE-1.7 Lightning Max",
     "in": 2.5,
     "out": 12.5,
     "cr": 1,
+    "cw": 0
+  },
+  "swe-1-7-lightning-medium": {
+    "label": "SWE-1.7 Lightning Medium",
+    "in": 2.5,
+    "out": 12.5,
+    "cr": 1,
+    "cw": 0
+  },
+  "swe-1-7-medium": {
+    "label": "SWE-1.7 Medium",
+    "in": 0.5,
+    "out": 2.5,
+    "cr": 0.2,
+    "cw": 0
+  },
+  "swe-2-max": {
+    "label": "SWE-2 Max (est)",
+    "in": 1,
+    "out": 5,
+    "cr": 0.4,
+    "cw": 0
+  },
+  "swe-2": {
+    "label": "SWE-2 (est)",
+    "in": 1,
+    "out": 5,
+    "cr": 0.4,
     "cw": 0
   },
   "swe-check": {
@@ -1406,6 +1439,343 @@
     "in": 0.3,
     "out": 0.5,
     "cr": 0,
+    "cw": 0
+  },
+  "deepseek-v4-flash-high": {
+    "label": "DeepSeek V4 Flash High",
+    "in": 0.14,
+    "out": 0.28,
+    "cr": 0.028,
+    "cw": 0
+  },
+  "deepseek-v4-flash-low": {
+    "label": "DeepSeek V4 Flash Low",
+    "in": 0.14,
+    "out": 0.28,
+    "cr": 0.028,
+    "cw": 0
+  },
+  "deepseek-v4-flash-max": {
+    "label": "DeepSeek V4 Flash Max",
+    "in": 0.14,
+    "out": 0.28,
+    "cr": 0.028,
+    "cw": 0
+  },
+  "deepseek-v4-pro-low": {
+    "label": "DeepSeek V4 Pro Low",
+    "in": 1.74,
+    "out": 3.48,
+    "cr": 0.15,
+    "cw": 0
+  },
+  "deepseek-v4-pro-max": {
+    "label": "DeepSeek V4 Pro Max",
+    "in": 1.74,
+    "out": 3.48,
+    "cr": 0.15,
+    "cw": 0
+  },
+  "gemini-3-7-flash-high": {
+    "label": "Gemini 3.7 Flash High",
+    "in": 1.5,
+    "out": 7.5,
+    "cr": 0.15,
+    "cw": 1.5
+  },
+  "gemini-3-7-flash-low": {
+    "label": "Gemini 3.7 Flash Low",
+    "in": 1.5,
+    "out": 7.5,
+    "cr": 0.15,
+    "cw": 1.5
+  },
+  "gemini-3-7-flash-medium": {
+    "label": "Gemini 3.7 Flash Medium",
+    "in": 1.5,
+    "out": 7.5,
+    "cr": 0.15,
+    "cw": 1.5
+  },
+  "gemini-3-7-flash-minimal": {
+    "label": "Gemini 3.7 Flash Minimal",
+    "in": 1.5,
+    "out": 7.5,
+    "cr": 0.15,
+    "cw": 1.5
+  },
+  "compactor": {
+    "label": "Compactor",
+    "in": 0.5,
+    "out": 2.5,
+    "cr": 0.2,
+    "cw": 0,
+    "estimated": true
+  },
+  "MODEL_CHAT_GPT_5_CODEX": {
+    "label": "GPT-5-Codex",
+    "in": 1.25,
+    "out": 10,
+    "cr": 0.125,
+    "cw": 0
+  },
+  "MODEL_CLAUDE_4_1_OPUS": {
+    "label": "Claude Opus 4.1",
+    "in": 15,
+    "out": 75,
+    "cr": 1.5,
+    "cw": 18.75
+  },
+  "MODEL_CLAUDE_4_1_OPUS_THINKING": {
+    "label": "Claude Opus 4.1 Thinking",
+    "in": 15,
+    "out": 75,
+    "cr": 1.5,
+    "cw": 18.75
+  },
+  "MODEL_GPT_5_1_CODEX_LOW": {
+    "label": "GPT-5.1-Codex Low",
+    "in": 1.25,
+    "out": 10,
+    "cr": 0.125,
+    "cw": 0
+  },
+  "MODEL_GPT_5_1_CODEX_MAX_HIGH": {
+    "label": "GPT-5.1-Codex Max High",
+    "in": 1.25,
+    "out": 10,
+    "cr": 0.125,
+    "cw": 0
+  },
+  "MODEL_GPT_5_1_CODEX_MAX_LOW": {
+    "label": "GPT-5.1-Codex Max Low",
+    "in": 1.25,
+    "out": 10,
+    "cr": 0.125,
+    "cw": 0
+  },
+  "MODEL_GPT_5_1_CODEX_MAX_MEDIUM": {
+    "label": "GPT-5.1-Codex Max Medium",
+    "in": 1.25,
+    "out": 10,
+    "cr": 0.125,
+    "cw": 0
+  },
+  "MODEL_GPT_5_1_CODEX_MINI_LOW": {
+    "label": "GPT-5.1-Codex-Mini Low",
+    "in": 0.25,
+    "out": 2,
+    "cr": 0.025,
+    "cw": 0
+  },
+  "MODEL_GPT_5_2_CODEX_HIGH": {
+    "label": "GPT-5.2-Codex High",
+    "in": 1.75,
+    "out": 14,
+    "cr": 0.175,
+    "cw": 0
+  },
+  "MODEL_GPT_5_2_CODEX_HIGH_PRIORITY": {
+    "label": "GPT-5.2-Codex High Fast",
+    "in": 3.5,
+    "out": 28,
+    "cr": 0.35,
+    "cw": 0
+  },
+  "MODEL_GPT_5_2_CODEX_LOW": {
+    "label": "GPT-5.2-Codex Low",
+    "in": 1.75,
+    "out": 14,
+    "cr": 0.175,
+    "cw": 0
+  },
+  "MODEL_GPT_5_2_CODEX_LOW_PRIORITY": {
+    "label": "GPT-5.2-Codex Low Fast",
+    "in": 3.5,
+    "out": 28,
+    "cr": 0.35,
+    "cw": 0
+  },
+  "MODEL_GPT_5_2_CODEX_MEDIUM": {
+    "label": "GPT-5.2-Codex Medium",
+    "in": 1.75,
+    "out": 14,
+    "cr": 0.175,
+    "cw": 0
+  },
+  "MODEL_GPT_5_2_CODEX_MEDIUM_PRIORITY": {
+    "label": "GPT-5.2-Codex Medium Fast",
+    "in": 3.5,
+    "out": 28,
+    "cr": 0.35,
+    "cw": 0
+  },
+  "MODEL_GPT_5_2_CODEX_XHIGH": {
+    "label": "GPT-5.2-Codex XHigh",
+    "in": 1.75,
+    "out": 14,
+    "cr": 0.175,
+    "cw": 0
+  },
+  "MODEL_GPT_5_2_CODEX_XHIGH_PRIORITY": {
+    "label": "GPT-5.2-Codex XHigh Fast",
+    "in": 3.5,
+    "out": 28,
+    "cr": 0.35,
+    "cw": 0
+  },
+  "MODEL_PRIVATE_19": {
+    "label": "GPT-5.1-Codex-Mini",
+    "in": 1.25,
+    "out": 10,
+    "cr": 0.125,
+    "cw": 0
+  },
+  "MODEL_PRIVATE_5": {
+    "label": "GPT-5-Codex",
+    "in": 1.25,
+    "out": 10,
+    "cr": 0.125,
+    "cw": 0
+  },
+  "MODEL_PRIVATE_9": {
+    "label": "GPT-5.1-Codex Medium",
+    "in": 0.25,
+    "out": 2,
+    "cr": 0.025,
+    "cw": 0
+  },
+  "MODEL_SWE_1_5": {
+    "label": "SWE-1.5 Fast",
+    "in": 0.3,
+    "out": 1.5,
+    "cr": 0.03,
+    "cw": 0.375
+  },
+  "MODEL_SWE_1_5_SLOW": {
+    "label": "SWE-1.5",
+    "in": 0,
+    "out": 0,
+    "cr": 0,
+    "cw": 0
+  },
+  "claude-opus-4-6-fast": {
+    "label": "Claude Opus 4.6 Fast",
+    "in": 30,
+    "out": 150,
+    "cr": 3,
+    "cw": 37.5
+  },
+  "claude-opus-4-6-thinking-fast": {
+    "label": "Claude Opus 4.6 Thinking Fast",
+    "in": 30,
+    "out": 150,
+    "cr": 3,
+    "cw": 37.5
+  },
+  "claude-opus-4-7-high-fast": {
+    "label": "Claude Opus 4.7 High Fast",
+    "in": 30,
+    "out": 150,
+    "cr": 3,
+    "cw": 37.5
+  },
+  "claude-opus-4-7-low-fast": {
+    "label": "Claude Opus 4.7 Low Fast",
+    "in": 30,
+    "out": 150,
+    "cr": 3,
+    "cw": 37.5
+  },
+  "claude-opus-4-7-max-fast": {
+    "label": "Claude Opus 4.7 Max Fast",
+    "in": 30,
+    "out": 150,
+    "cr": 3,
+    "cw": 37.5
+  },
+  "claude-opus-4-7-medium-fast": {
+    "label": "Claude Opus 4.7 Medium Fast",
+    "in": 30,
+    "out": 150,
+    "cr": 3,
+    "cw": 37.5
+  },
+  "claude-opus-4-7-xhigh-fast": {
+    "label": "Claude Opus 4.7 XHigh Fast",
+    "in": 30,
+    "out": 150,
+    "cr": 3,
+    "cw": 37.5
+  },
+  "claude-fable-5-high": {
+    "label": "Claude Fable 5 High",
+    "in": 10,
+    "out": 50,
+    "cr": 1,
+    "cw": 12.5
+  },
+  "claude-fable-5-low": {
+    "label": "Claude Fable 5 Low",
+    "in": 10,
+    "out": 50,
+    "cr": 1,
+    "cw": 12.5
+  },
+  "claude-fable-5-max": {
+    "label": "Claude Fable 5 Max",
+    "in": 10,
+    "out": 50,
+    "cr": 1,
+    "cw": 12.5
+  },
+  "claude-fable-5-medium": {
+    "label": "Claude Fable 5 Medium",
+    "in": 10,
+    "out": 50,
+    "cr": 1,
+    "cw": 12.5
+  },
+  "claude-fable-5-xhigh": {
+    "label": "Claude Fable 5 XHigh",
+    "in": 10,
+    "out": 50,
+    "cr": 1,
+    "cw": 12.5
+  },
+  "deepseek-v4": {
+    "label": "DeepSeek V4 Pro",
+    "in": 1.74,
+    "out": 3.48,
+    "cr": 0.15,
+    "cw": 0
+  },
+  "glm-5-1": {
+    "label": "GLM-5.1",
+    "in": 1.4,
+    "out": 4.4,
+    "cr": 0.26,
+    "cw": 0
+  },
+  "kimi-k2-5": {
+    "label": "Kimi K2.5",
+    "in": 0.6,
+    "out": 3,
+    "cr": 0.1,
+    "cw": 0
+  },
+  "minimax-m2-5": {
+    "label": "Minimax M2.5",
+    "in": 0.3,
+    "out": 1.2,
+    "cr": 0.03,
+    "cw": 0.375
+  },
+  "nemotron-3-ultra-nvfp4": {
+    "label": "Nemotron 3 Ultra",
+    "in": 0.6,
+    "out": 2.4,
+    "cr": 0.12,
     "cw": 0
   }
 }
