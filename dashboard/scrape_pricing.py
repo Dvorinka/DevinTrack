@@ -23,9 +23,37 @@ from pathlib import Path
 URL = 'https://docs.devin.ai/desktop/models'
 PRICING_PATH = Path(__file__).parent / 'pricing.json'
 
-# Estimated pricing for free models not in the official table.
+# Estimated pricing for models not in the official table.
 # These are guesses based on comparable model tiers.
+# Compactor is an internal context-compaction (summarization) model — not
+# user-selectable, not listed on docs.devin.ai/desktop/models. Token profile
+# (median 59K input, ~1K output, ~200 tok/s, finish_reason=stop) matches the
+# SWE-1.6 speed tier, so we use SWE-1.6's official rates as a ceiling.
+# Real cost may be $0 (free internal, like swe-check at multiplier 0).
 ESTIMATED_PRICING = {
+    # SWE-2 (post-trained Kimi K3, 2.8T params): not yet in the official table.
+    # Priced at K3 parity ($3/$15) — identical serving cost. Consistent with
+    # the SWE-2 blog claim of ~64% lower cost per task vs Fable 5.1 ($10/$50).
+    'swe-2': {
+        'label': 'SWE-2 (est)',
+        'in': 3, 'out': 15, 'cr': 0.3, 'cw': 0, 'estimated': True,
+    },
+    'swe-2-low': {
+        'label': 'SWE-2 Low (est)',
+        'in': 3, 'out': 15, 'cr': 0.3, 'cw': 0, 'estimated': True,
+    },
+    'swe-2-medium': {
+        'label': 'SWE-2 Medium (est)',
+        'in': 3, 'out': 15, 'cr': 0.3, 'cw': 0, 'estimated': True,
+    },
+    'swe-2-high': {
+        'label': 'SWE-2 High (est)',
+        'in': 3, 'out': 15, 'cr': 0.3, 'cw': 0, 'estimated': True,
+    },
+    'swe-2-max': {
+        'label': 'SWE-2 Max (est)',
+        'in': 3, 'out': 15, 'cr': 0.3, 'cw': 0, 'estimated': True,
+    },
     'swe-1-7': {
         'label': 'SWE-1.7',
         'in': 1.5,
@@ -39,6 +67,14 @@ ESTIMATED_PRICING = {
         'in': 1.5,
         'out': 7.0,
         'cr': 0.15,
+        'cw': 0,
+        'estimated': True,
+    },
+    'compactor': {
+        'label': 'Compactor',
+        'in': 0.5,
+        'out': 2.5,
+        'cr': 0.2,
         'cw': 0,
         'estimated': True,
     },
@@ -140,14 +176,16 @@ def main():
     # Merge with existing pricing.json:
     # - Models in scraped data: replace with fresh scraped values, UNLESS the
     #   existing entry is marked "custom" (user override) — those are preserved.
+    #   Stale "estimated" entries are NOT preserved — official data wins once
+    #   a model appears in the scrape.
     # - Models NOT in scraped data: keep existing entry as-is.
     if PRICING_PATH.exists():
         with open(PRICING_PATH) as f:
             existing = json.load(f)
         for uid, rates in existing.items():
             if uid in pricing:
-                # Model exists in both — keep user's custom override.
-                if rates.get('custom') or rates.get('estimated'):
+                # Model exists in both — keep user's custom override only.
+                if rates.get('custom'):
                     pricing[uid] = rates
             else:
                 # Model only in local file — keep it.

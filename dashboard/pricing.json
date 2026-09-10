@@ -1408,31 +1408,43 @@
   },
   "swe-2": {
     "label": "SWE-2 (est)",
-    "in": 1,
-    "out": 5,
-    "cr": 0.4,
-    "cw": 0
+    "in": 3,
+    "out": 15,
+    "cr": 0.3,
+    "cw": 0,
+    "estimated": true
+  },
+  "swe-2-low": {
+    "label": "SWE-2 Low (est)",
+    "in": 3,
+    "out": 15,
+    "cr": 0.3,
+    "cw": 0,
+    "estimated": true
   },
   "swe-2-medium": {
     "label": "SWE-2 Medium (est)",
-    "in": 1,
-    "out": 5,
-    "cr": 0.4,
-    "cw": 0
+    "in": 3,
+    "out": 15,
+    "cr": 0.3,
+    "cw": 0,
+    "estimated": true
   },
   "swe-2-high": {
     "label": "SWE-2 High (est)",
-    "in": 1,
-    "out": 5,
-    "cr": 0.4,
-    "cw": 0
+    "in": 3,
+    "out": 15,
+    "cr": 0.3,
+    "cw": 0,
+    "estimated": true
   },
   "swe-2-max": {
     "label": "SWE-2 Max (est)",
-    "in": 1,
-    "out": 5,
-    "cr": 0.4,
-    "cw": 0
+    "in": 3,
+    "out": 15,
+    "cr": 0.3,
+    "cw": 0,
+    "estimated": true
   },
   "swe-check": {
     "label": "SWE-check",
