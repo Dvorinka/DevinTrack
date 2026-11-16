@@ -25,7 +25,10 @@ from pathlib import Path
 
 
 def data_dir() -> Path:
-    base = os.environ.get('XDG_DATA_HOME', Path.home() / '.local' / 'share')
+    if sys.platform == 'win32':
+        base = os.environ.get('LOCALAPPDATA', str(Path.home() / 'AppData' / 'Local'))
+    else:
+        base = os.environ.get('XDG_DATA_HOME', Path.home() / '.local' / 'share')
     d = Path(base) / 'devin_track'
     d.mkdir(parents=True, exist_ok=True)
     return d
@@ -100,9 +103,96 @@ def init_db():
                 pass
 
 
-def find_real_devin() -> str:
+def _windows_bin_dirs() -> list:
+    """Candidate dirs that may contain a real devin.exe on Windows."""
+    dirs = []
+    # T3 / Devin CLI layout: ~/.t3/tools/devin/<version>/windows-x86_64/bin
+    t3 = Path.home() / '.t3' / 'tools' / 'devin'
+    if t3.is_dir():
+        for ver in sorted(t3.iterdir(), reverse=True):
+            for plat in ('windows-x86_64', 'windows-aarch64'):
+                d = ver / plat / 'bin'
+                if d.is_dir():
+                    dirs.append(d)
+    # Devin CLI versioned layout under roaming app data.
+    cli = Path(os.environ.get('APPDATA', Path.home() / 'AppData' / 'Roaming')) / 'devin' / 'cli' / '_versions'
+    if cli.is_dir():
+        for ver in cli.iterdir():
+            d = ver / 'bin'
+            if d.is_dir():
+                dirs.append(d)
+    # Devin Desktop.
+    dirs.append(Path(os.environ.get('LOCALAPPDATA', '')) / 'Programs' / 'Devin Desktop' / 'resources' / 'app' / 'extensions' / 'windsurf' / 'devin' / 'bin')
+    dirs.append(Path(os.environ.get('PROGRAMFILES', r'C:\Program Files')) / 'Devin Desktop' / 'resources' / 'app' / 'extensions' / 'windsurf' / 'devin' / 'bin')
+    return dirs
+
+
+def _is_launcher(path: str) -> bool:
+    """True if path is the DevinTrack launcher exe, not the real Devin binary.
+
+    The launcher is a few-KB .NET stub deployed AS devin.exe on Windows;
+    the real CLI is tens of MB. Copying it over a backup would corrupt the
+    backup and recurse, so it must never be treated as the real image.
+    """
+    try:
+        if os.path.getsize(path) > 1_000_000:
+            return False
+        with open(path, 'rb') as f:
+            return b'DevinTrackLauncher' in f.read(1_000_000)
+    except OSError:
+        return False
+
+
+def _sidecar_backup(bin_dir: str, image_path: str | None = None) -> str | None:
+    """Return a runnable copy of the real binary next to bin_dir.
+
+    Two Windows interception modes share this helper:
+      - compiled launcher: devin.exe IS our stub; the real binary lives at
+        devin.exe.bak — never copy the launcher over it.
+      - IFEO Debugger: devin.exe is the real binary; exec a differently-named
+        copy so the hook doesn't fire recursively, refreshing when stale.
+    Falls back to a copy inside data_dir when the bin dir is not writable.
+    """
+    image = image_path or os.path.join(bin_dir, 'devin.exe')
+    if not os.path.isfile(image):
+        return None
+    bak = os.path.join(bin_dir, 'devin.exe.bak')
+    if _is_launcher(image):
+        # devin.exe is our own stub: only existing real-binary copies qualify.
+        if os.path.isfile(bak) and not _is_launcher(bak):
+            return bak
+        alt = str(data_dir() / 'devin-real.exe')
+        if os.path.isfile(alt) and not _is_launcher(alt):
+            return alt
+        return None
+    try:
+        if os.path.isfile(bak) and os.path.getsize(bak) == os.path.getsize(image):
+            return bak
+        shutil.copy2(image, bak)
+        return bak
+    except OSError:
+        pass
+    # Bin dir not writable (e.g. Program Files): keep the copy in our data dir.
+    try:
+        alt = str(data_dir() / 'devin-real.exe')
+        if os.path.isfile(alt) and os.path.getsize(alt) == os.path.getsize(image):
+            return alt
+        shutil.copy2(image, alt)
+        return alt
+    except OSError:
+        return None
+
+
+def find_real_devin(image_path: str | None = None) -> str:
     if os.environ.get('DEVIN_TRACK_REAL'):
         return os.environ['DEVIN_TRACK_REAL']
+
+    # IFEO invocation: the OS prepended the image path to our argv.
+    # Exec a non-devin.exe copy so the hook doesn't fire recursively.
+    if image_path:
+        real = _sidecar_backup(os.path.dirname(image_path), image_path)
+        if real:
+            return real
 
     # Resolve symlinks: when the wrapper is reached via a symlink chain
     # (e.g. the CLI's ~/.local/bin/devin -> _versions/current/bin/devin ->
@@ -122,15 +212,18 @@ def find_real_devin() -> str:
     # Avoid resolving to ourself in PATH.
     found = shutil.which('devin')
     if found and os.path.abspath(found) != my_path:
+        # On Windows, invoking 'devin.exe' from PATH re-triggers the IFEO
+        # hook; exec a differently-named copy instead.
+        if sys.platform == 'win32' and found.lower().endswith('devin.exe'):
+            real = _sidecar_backup(os.path.dirname(found), found)
+            if real:
+                return real
         return found
 
     # Platform-specific fallback paths.
     candidates = []
     if sys.platform == 'win32':
-        candidates = [
-            os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Programs', 'Devin Desktop', 'resources', 'app', 'extensions', 'windsurf', 'devin', 'bin', 'devin.exe'),
-            os.path.join(os.environ.get('PROGRAMFILES', r'C:\Program Files'), 'Devin Desktop', 'resources', 'app', 'extensions', 'windsurf', 'devin', 'bin', 'devin.exe'),
-        ]
+        candidates = [str(d / 'devin.exe') for d in _windows_bin_dirs()]
     elif sys.platform == 'darwin':
         candidates = [
             '/Applications/Devin Desktop.app/Contents/Resources/app/extensions/windsurf/devin/bin/devin',
@@ -146,6 +239,10 @@ def find_real_devin() -> str:
 
     for candidate in candidates:
         if os.path.isfile(candidate):
+            if sys.platform == 'win32' and candidate.lower().endswith('devin.exe'):
+                real = _sidecar_backup(os.path.dirname(candidate), candidate)
+                if real:
+                    return real
             return candidate
 
     raise FileNotFoundError('real devin binary not found')
@@ -214,12 +311,21 @@ def run_backfill():
     to_date = today.strftime('%Y-%m-%d')
 
     try:
+        # Detach the backfill so it survives the wrapper. POSIX uses setsid;
+        # Windows uses creation flags (start_new_session is ignored there).
+        kwargs = {}
+        if sys.platform == 'win32':
+            kwargs['creationflags'] = (
+                subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+            )
+        else:
+            kwargs['start_new_session'] = True
         subprocess.Popen(
             [sys.executable, str(path), '--from', from_date, '--to', to_date],
-            start_new_session=True,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            **kwargs,
         )
         logging.info('spawned CLI backfill (%s -> %s)', from_date, to_date)
     except Exception as e:
@@ -795,11 +901,28 @@ def forward_stdout(child):
 
 
 def forward_stderr(child):
-    """Forward child stderr to our stderr, byte-for-byte."""
+    """Forward child stderr to our stderr, byte-for-byte.
+
+    sys.stderr.buffer can be missing or broken when stderr was redirected or
+    already closed by the parent (e.g. a piped harness that exited early);
+    fall back to stderr.write and swallow stream errors — losing a log line
+    is better than crashing the reader thread.
+    """
+    buf = getattr(sys.stderr, 'buffer', None)
     try:
         for line in iter(child.proc.stderr.readline, b''):
-            sys.stderr.buffer.write(line)
-            sys.stderr.buffer.flush()
+            if buf is not None:
+                try:
+                    buf.write(line)
+                    buf.flush()
+                    continue
+                except (OSError, ValueError):
+                    pass
+            try:
+                sys.stderr.write(line.decode('utf-8', 'replace'))
+                sys.stderr.flush()
+            except (OSError, ValueError):
+                break
     except Exception:
         logging.exception('stderr reader failed')
 
@@ -840,8 +963,15 @@ def run_acp(real_devin: str, argv: list):
     atexit.register(lambda p=proc: _terminate_child(p))
 
     # Signal handlers: forward SIGTERM/SIGHUP/SIGINT to the child, then exit.
-    for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
-        signal.signal(sig, lambda _s, _f, p=proc: (_terminate_child(p), sys.exit(1))[1])
+    # SIGHUP does not exist on Windows; skip signals the platform lacks.
+    for sig in ('SIGTERM', 'SIGHUP', 'SIGINT', 'SIGBREAK'):
+        signum = getattr(signal, sig, None)
+        if signum is None:
+            continue
+        try:
+            signal.signal(signum, lambda _s, _f, p=proc: (_terminate_child(p), sys.exit(1))[1])
+        except (OSError, ValueError):
+            pass
 
     out_q = queue.Queue()
     child = Child(proc, tracker, out_q)
@@ -901,7 +1031,7 @@ def run_print_mode(real_devin: str, argv: list):
         idx = argv.index('--prompt-file')
         if idx + 1 < len(argv):
             try:
-                with open(argv[idx + 1]) as f:
+                with open(argv[idx + 1], encoding='utf-8') as f:
                     prompt_text = f.read()[:500]
             except Exception:
                 pass
@@ -925,7 +1055,7 @@ def run_print_mode(real_devin: str, argv: list):
 
     # Parse the export file for token usage.
     try:
-        with open(export_path) as f:
+        with open(export_path, encoding='utf-8') as f:
             data = json.load(f)
 
         session_id = data.get('session_id', 'unknown')
@@ -988,17 +1118,45 @@ def run_print_mode(real_devin: str, argv: list):
     return proc.returncode
 
 
+def _is_ifeo_image(arg: str) -> bool:
+    """True if arg looks like the image path IFEO prepends to our argv.
+
+    With an Image File Execution Options 'Debugger' entry, Windows invokes
+    the wrapper as: python wrapper.py C:\\...\\devin.exe <original args>.
+    The injected first arg is a path to an existing devin.exe.
+    """
+    try:
+        return (
+            sys.platform == 'win32'
+            and arg.lower().endswith('devin.exe')
+            and os.path.isfile(arg)
+        )
+    except (OSError, TypeError):
+        return False
+
+
 def main():
     init_logging()
     argv = sys.argv[1:]
 
-    real_devin = find_real_devin()
+    # IFEO: the first arg may be the path of the image that was requested.
+    image_path = None
+    if argv and _is_ifeo_image(argv[0]):
+        image_path = argv.pop(0)
+
+    real_devin = find_real_devin(image_path)
     is_acp = argv and argv[0] == 'acp'
     is_print = '--print' in argv or '--prompt-file' in argv
     session = is_cli_session(argv)
 
     if not session:
-        # Non-session subcommand: exec the real binary directly for speed.
+        # Non-session subcommand: run the real binary directly for speed.
+        # os.execvp does not work on Windows (the "replaced" process loses
+        # stdio wiring and the exit code is not propagated), so spawn and
+        # forward there instead.
+        if sys.platform == 'win32':
+            proc = subprocess.run([real_devin] + argv)
+            return proc.returncode
         os.execvp(real_devin, [real_devin] + argv)
 
     logging.info('starting wrapper; real devin=%s', real_devin)

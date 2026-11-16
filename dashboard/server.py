@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 DevinTrack Dashboard server.
 Stdlib-only HTTP server serving JSON API from the usage SQLite DB
@@ -19,7 +19,7 @@ from urllib.parse import urlparse, parse_qs
 
 
 # ---------------------------------------------------------------------------
-# Model pricing — loaded from pricing.json (scraped from docs.devin.ai)
+# Model pricing â€” loaded from pricing.json (scraped from docs.devin.ai)
 # ---------------------------------------------------------------------------
 
 _PRICING = None
@@ -29,7 +29,7 @@ def load_pricing():
     if _PRICING is None:
         path = Path(__file__).parent / 'pricing.json'
         if path.exists():
-            with open(path) as f:
+            with open(path, encoding='utf-8') as f:
                 _PRICING = json.load(f)
         else:
             _PRICING = {}
@@ -37,7 +37,7 @@ def load_pricing():
 
 
 # ---------------------------------------------------------------------------
-# Reprocess offset tracking — prevents reprocessing data that was reset.
+# Reprocess offset tracking â€” prevents reprocessing data that was reset.
 # On reset, the offset advances to the end of wrapper.log so old events
 # are never re-inserted. Only new events after the reset are processed.
 # ---------------------------------------------------------------------------
@@ -51,7 +51,7 @@ def _get_reprocess_offset():
     p = _reprocess_state_path()
     if p.exists():
         try:
-            with open(p) as f:
+            with open(p, encoding='utf-8') as f:
                 return json.load(f).get('last_offset', 0)
         except (json.JSONDecodeError, KeyError):
             pass
@@ -59,7 +59,7 @@ def _get_reprocess_offset():
 
 
 def _set_reprocess_offset(offset):
-    with open(_reprocess_state_path(), 'w') as f:
+    with open(_reprocess_state_path(), 'w', encoding='utf-8') as f:
         json.dump({'last_offset': offset}, f)
 
 
@@ -105,7 +105,10 @@ def estimate_cost(model, input_tokens, output_tokens, cached_read_tokens, cached
 
 
 def data_dir() -> Path:
-    base = os.environ.get('XDG_DATA_HOME', Path.home() / '.local' / 'share')
+    if sys.platform == 'win32':
+        base = os.environ.get('LOCALAPPDATA', str(Path.home() / 'AppData' / 'Local'))
+    else:
+        base = os.environ.get('XDG_DATA_HOME', Path.home() / '.local' / 'share')
     return Path(base) / 'devin_track'
 
 
@@ -115,6 +118,46 @@ def db_path() -> Path:
 
 def web_dist() -> Path:
     return Path(__file__).parent / 'web' / 'dist'
+
+
+def init_db():
+    """Create the schema when usage.db does not exist yet.
+
+    The dashboard must work on a fresh install before the wrapper has
+    captured its first request; the wrapper also runs init_db on the
+    session path, so the statements are idempotent.
+    """
+    with sqlite3.connect(db_path()) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS sessions (
+                session_id TEXT PRIMARY KEY,
+                created_at TEXT,
+                updated_at TEXT,
+                model TEXT,
+                cwd TEXT,
+                first_prompt TEXT,
+                description TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS usage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                session_id TEXT,
+                request_id TEXT,
+                model TEXT,
+                input_tokens INTEGER DEFAULT 0,
+                output_tokens INTEGER DEFAULT 0,
+                total_tokens INTEGER DEFAULT 0,
+                cached_read_tokens INTEGER DEFAULT 0,
+                cached_write_tokens INTEGER DEFAULT 0,
+                duration_ms INTEGER,
+                stop_reason TEXT,
+                error_message TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+            """
+        )
 
 
 def ensure_db_columns():
@@ -675,7 +718,7 @@ def _parse_session_metadata(log_path, offset=0):
     # Map request id -> cwd for session/new (sessionId not known until response).
     pending_cwd = {}
 
-    with open(log_path) as f:
+    with open(log_path, encoding='utf-8', errors='replace') as f:
         if offset > 0:
             f.seek(offset)
         for line in f:
@@ -805,7 +848,7 @@ def _parse_prompt_requests(log_path, offset=0):
     Only reads from byte offset onwards.
     """
     prompts = {}
-    with open(log_path) as f:
+    with open(log_path, encoding='utf-8', errors='replace') as f:
         if offset > 0:
             f.seek(offset)
         for line in f:
@@ -884,7 +927,7 @@ def _parse_agent_stopped_events(log_path, offset=0):
     Only reads from byte offset onwards (to skip already-processed/reset data).
     """
     events = {}
-    with open(log_path) as f:
+    with open(log_path, encoding='utf-8', errors='replace') as f:
         if offset > 0:
             f.seek(offset)
         for line in f:
@@ -956,7 +999,7 @@ def reprocess_wrapper_log():
         if rotated_path.exists():
             rotated_size = rotated_path.stat().st_size
             if offset < rotated_size:
-                # The old offset points into wrapper.log.1 — process the
+                # The old offset points into wrapper.log.1 â€” process the
                 # remaining events from there before handling the new log.
                 _reprocess_from_log(rotated_path, offset)
         offset = 0
@@ -970,7 +1013,7 @@ def reprocess_wrapper_log():
 def _reprocess_from_log(log_path, offset):
     """Process agent_stopped events from a single log file starting at offset.
 
-    Returns a summary dict. Does NOT update the reprocess offset — the caller
+    Returns a summary dict. Does NOT update the reprocess offset â€” the caller
     is responsible for that.
     """
     events = _parse_agent_stopped_events(log_path, offset)
@@ -1061,7 +1104,7 @@ def _reprocess_from_log(log_path, offset):
         # events. Uses the LOG timestamp (not DB timestamp) for time proximity,
         # because DB UUID rows may have been overwritten by a previous reprocess
         # run. The log timestamp is the original event time.
-        # ±120s window catches the race condition where session/prompt (per-call
+        # Â±120s window catches the race condition where session/prompt (per-call
         # tokens) arrived shortly after agent_stopped (cumulative tokens).
         sessions_with_events = set(sid for (sid, _) in events)
         for sid in sessions_with_events:
@@ -1107,7 +1150,7 @@ def _reprocess_from_log(log_path, offset):
 
             # Try model from responseDimensions / modelLabel.
             # The modelLabel in agent_stopped is the ground truth for this
-            # specific request — it reflects the model that was actually
+            # specific request â€” it reflects the model that was actually
             # running at that moment, even if the session was switched
             # mid-session. Always use it when available.
             dim_model = None
@@ -1228,7 +1271,7 @@ def api_ingest(payload: dict):
     }
 
     Entries are inserted with the given source tag. Duplicate detection is
-    based on (session_id, request_id, timestamp) — existing entries are skipped.
+    based on (session_id, request_id, timestamp) â€” existing entries are skipped.
     """
     source = payload.get('source', 'remote')
     usage_rows = payload.get('usage', [])
@@ -1434,6 +1477,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    init_db()
     ensure_db_columns()
     if '--reprocess' in sys.argv:
         result = reprocess_wrapper_log()

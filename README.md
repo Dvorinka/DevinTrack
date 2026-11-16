@@ -35,9 +35,9 @@ All data is stored locally. No data leaves your machine.
 |---|---|---|---|---|
 | Linux | Full | Yes | Yes | Yes |
 | macOS | Full | Yes | Yes | Yes |
-| Windows | Partial | Experimental | Yes | N/A (no SSH) |
+| Windows | Full | Yes | Yes | N/A (no SSH) |
 
-The dashboard server and frontend work on all platforms. The wrapper works on Linux and macOS. Windows support is experimental — see [Windows notes](#windows-notes) below.
+The dashboard server and frontend work on all platforms. The wrapper works on Linux, macOS, and Windows — see [Windows notes](#windows-notes) for how interception works there.
 
 ## Quick start
 
@@ -171,13 +171,20 @@ This scrapes current pricing from `docs.devin.ai` and writes updated rates to `p
 
 ## Windows notes
 
-Windows support is experimental. The wrapper is a Python script, and Windows doesn't use shebang lines. The `deploy.py` script handles this by:
+Windows doesn't use shebang lines, so a Python script cannot replace `devin.exe` directly. `deploy.py` instead compiles a tiny native launcher that takes the binary's place:
 
-1. Backing up `devin.exe` to `devin.exe.bak`
-2. Installing `devin_wrapper.py` alongside the original
-3. Creating a `devin.cmd` shim that calls Python on the wrapper
+1. The real `devin.exe` is moved aside to `devin.exe.bak`
+2. A small C# launcher (`devin_launcher.cs`, compiled with the `csc.exe` bundled in .NET Framework 4.x, which ships with Windows) is built as the new `devin.exe`
+3. Any launch of `devin.exe` — absolute path, `PATH`, or from Devin Desktop/T3 — now runs the launcher, which starts `python devin_wrapper.py` with stdin/stdout/stderr passed through, so the ACP protocol flows untouched
+4. `devin_wrapper.py` and a `devin.cmd` convenience shim are installed alongside the binary
 
-You may need to set `DEVIN_TRACK_REAL` to point to the backup binary:
+Requirements: Python 3.10+ and .NET Framework 4.x (preinstalled on Windows 10/11). No admin rights and no registry changes are needed; `deploy.py` discovers the CLI under `%USERPROFILE%\.t3\tools\devin\` and the usual Devin Desktop locations, and `DEVIN_BIN_DIR` overrides discovery.
+
+Data lives in `%LOCALAPPDATA%\devin_track\` and the CLI's session database is read from `%APPDATA%\devin\cli\sessions.db`. Log files are read as UTF-8 regardless of the system codepage, so non-ASCII prompts (e.g. Czech text) display correctly.
+
+To uninstall: `python deploy.py --undeploy` restores `devin.exe.bak` as `devin.exe` and removes the wrapper files.
+
+You can also set `DEVIN_TRACK_REAL` to point to the real binary explicitly:
 
 ```powershell
 $env:DEVIN_TRACK_REAL = "C:\path\to\devin.exe.bak"
