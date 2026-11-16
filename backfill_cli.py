@@ -56,12 +56,19 @@ def extract_reasoning_effort(model_value):
 
 
 def cli_db_path() -> Path:
-    base = os.environ.get('XDG_DATA_HOME', Path.home() / '.local' / 'share')
+    if sys.platform == 'win32':
+        # Devin CLI stores its session DB under %APPDATA%\devin\cli.
+        base = os.environ.get('APPDATA', Path.home() / 'AppData' / 'Roaming')
+    else:
+        base = os.environ.get('XDG_DATA_HOME', Path.home() / '.local' / 'share')
     return Path(base) / 'devin' / 'cli' / 'sessions.db'
 
 
 def track_db_path() -> Path:
-    base = os.environ.get('XDG_DATA_HOME', Path.home() / '.local' / 'share')
+    if sys.platform == 'win32':
+        base = os.environ.get('LOCALAPPDATA', Path.home() / 'AppData' / 'Local')
+    else:
+        base = os.environ.get('XDG_DATA_HOME', Path.home() / '.local' / 'share')
     return Path(base) / 'devin_track' / 'usage.db'
 
 
